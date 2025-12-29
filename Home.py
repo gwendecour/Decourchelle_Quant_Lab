@@ -1,117 +1,109 @@
 import streamlit as st
+from src.shared.ui import render_header
 
-# Page Configuration must be the first line
+# --- CONFIGURATION DE LA PAGE ---
 st.set_page_config(
     page_title="Gwendal Quant Lab",
     page_icon="🧪",
     layout="wide",
-    initial_sidebar_state="collapsed" # On cache la sidebar par défaut pour un look "Site Web"
+    initial_sidebar_state="collapsed"
 )
 
-# Custom CSS for the "Card" look
+# --- IMPORT DU HEADER ---
+render_header()
+
+# --- CSS PERSONNALISÉ (POLICE & BOUTONS) ---
 st.markdown("""
 <style>
-    .category-card {
+    /* Import de la police 'Lora' (Style académique/finance) */
+    @import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;600&display=swap');
+
+    /* Appliquer la police aux titres */
+    h1, h2, h3, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
+        font-family: 'Lora', serif !important;
+        color: #1a1a1a;
+    }
+    
+    /* Appliquer une police propre au texte */
+    p, .stMarkdown, .stText {
+        font-family: 'Inter', sans-serif !important;
+        color: #4a4a4a;
+        line-height: 1.6;
+    }
+
+    /* CUSTOM BUTTON STYLE (Vert élégant comme demandé) */
+    div.stButton > button {
+        background-color: #2e7d32; /* Vert Finance */
+        color: white;
+        border: none;
+        border-radius: 5px;
+        padding: 0.5rem 1rem;
+        font-weight: 600;
+        width: 100%;
+        transition: all 0.3s ease;
+    }
+    div.stButton > button:hover {
+        background-color: #1b5e20;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+        color: white;
+    }
+    
+    /* Style des cartes (Containers) */
+    [data-testid="stVerticalBlock"] > [style*="flex-direction: column;"] > [data-testid="stVerticalBlock"] {
         background-color: white;
-        border: 1px solid #e0e0e0;
-        border-radius: 10px;
-        padding: 20px;
-        text-align: center;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        transition: transform 0.2s;
-        height: 350px;
-        display: flex;
-        flex-direction: column;
-        justify_content: space-between;
-    }
-    .category-card:hover {
-        transform: scale(1.02);
-        box-shadow: 0 8px 12px rgba(0,0,0,0.15);
-    }
-    .card-title {
-        font-size: 1.2rem;
-        font-weight: bold;
-        margin-bottom: 10px;
-        color: #333;
-    }
-    .card-desc {
-        font-size: 0.9rem;
-        color: #666;
-        margin-bottom: 20px;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# --- HEADER ---
-st.title("🧪 Gwendal Quant Lab")
-st.markdown("#### Explore my quantitative finance projects powered by Python.")
-st.markdown("---")
+# --- TITRE PRINCIPAL ---
+st.markdown("<h1 style='text-align: center; margin-bottom: 10px;'>Choose Your Product</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; margin-bottom: 50px; color: gray;'>Each simulator provides comprehensive mathematical modeling with interactive controls and real-time visualizations.</p>", unsafe_allow_html=True)
 
-# --- PROJECT CARDS SECTION ---
-st.header("Choose Your Product")
-st.write("Each simulator provides comprehensive mathematical modeling with interactive controls and real-time visualizations.")
-st.write("") # Spacer
+# --- GRILLE DES PROJETS ---
+col1, col2, col3 = st.columns(3, gap="medium")
 
-col1, col2, col3 = st.columns(3)
-
-# CARD 1 : Derivatives Pricing (Ton projet actuel)
+# --- CARTE 1 : PRICING ---
 with col1:
-    st.markdown("""
-    <div class="category-card">
-        <div>
-            <div style="font-size: 3rem; margin-bottom: 10px;">💎</div>
-            <div class="card-title">Derivatives Pricing & Hedging</div>
-            <div class="card-desc">
-                Advanced pricing engine for Vanilla and Structured Products (Phoenix Autocall). 
-                Includes Monte Carlo simulations, Dynamic Greeks analysis, and Delta-Hedging backtesting.
-            </div>
+    # On utilise st.container(border=True) pour créer la boite
+    with st.container(border=True):
+        st.markdown("### 💎 Derivatives Pricing")
+        st.markdown("""
+        <div style="height: 120px;">
+        Advanced pricing engine for Vanilla and Structured Products (Phoenix Autocall). 
+        Includes Monte Carlo simulations and Delta-Hedging backtesting.
         </div>
-    </div>
-    """, unsafe_allow_html=True)
-    st.write("")
-    if st.button("Explore Pricing Engine", use_container_width=True):
-        st.switch_page("pages/01_💎_Derivatives_Pricer.py")
+        """, unsafe_allow_html=True)
+        
+        st.write("") # Spacer
+        if st.button("Explore Pricing Engine", key="btn_pricing"):
+            st.switch_page("pages/01_💎_Derivatives_Pricer.py")
 
-# CARD 2 : Investment Strategy (Futur)
+# --- CARTE 2 : INVESTMENT ---
 with col2:
-    st.markdown("""
-    <div class="category-card">
-        <div>
-            <div style="font-size: 3rem; margin-bottom: 10px;">📈</div>
-            <div class="card-title">Investment Strategies</div>
-            <div class="card-desc">
-                Systematic trading strategy backtester. 
-                Test Moving Averages crossovers, RSI strategies, and optimize portfolio allocation using Markowitz Efficient Frontier.
-            </div>
+    with st.container(border=True):
+        st.markdown("### 📈 Investment Strategies")
+        st.markdown("""
+        <div style="height: 120px;">
+        Systematic trading strategy backtester. 
+        Test Moving Averages crossovers, RSI strategies, and optimize portfolio allocation using Markowitz Frontier.
         </div>
-    </div>
-    """, unsafe_allow_html=True)
-    st.write("")
-    if st.button("Explore Strategies", use_container_width=True):
-        st.switch_page("pages/02_📈_Investment_Strategy.py")
+        """, unsafe_allow_html=True)
+        
+        st.write("") # Spacer
+        if st.button("Explore Strategies", key="btn_invest"):
+            st.switch_page("pages/02_📈_Investment_Strategy.py")
 
-# CARD 3 : Volatility (Futur)
+# --- CARTE 3 : VOLATILITY ---
 with col3:
-    st.markdown("""
-    <div class="category-card">
-        <div>
-            <div style="font-size: 3rem; margin-bottom: 10px;">⚡</div>
-            <div class="card-title">Volatility Estimator</div>
-            <div class="card-desc">
-                Market Risk engine focused on volatility modeling.
-                Compare GARCH models vs EWMA, analyze Volatility Surfaces, and perform VaR Stress Tests.
-            </div>
+    with st.container(border=True):
+        st.markdown("### ⚡ Volatility Estimator")
+        st.markdown("""
+        <div style="height: 120px;">
+        Market Risk engine focused on volatility modeling.
+        Compare GARCH models vs EWMA, analyze Volatility Surfaces, and perform VaR Stress Tests.
         </div>
-    </div>
-    """, unsafe_allow_html=True)
-    st.write("")
-    if st.button("Explore Volatility", use_container_width=True):
-        st.switch_page("pages/03_⚡_Volatility_Estimator.py")
-
-# --- FOOTER / CONTACT ---
-st.markdown("---")
-c1, c2 = st.columns([1,1])
-with c1:
-    st.markdown("**About this site:** Built with Python & Streamlit.")
-with c2:
-    st.markdown(f"**Contact:** [LinkedIn](https://www.linkedin.com/) | [GitHub](https://github.com/)")
+        """, unsafe_allow_html=True)
+        
+        st.write("") # Spacer
+        if st.button("Explore Volatility", key="btn_vol"):
+            st.switch_page("pages/03_⚡_Volatility_Estimator.py")

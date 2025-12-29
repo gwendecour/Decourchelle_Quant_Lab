@@ -2,7 +2,7 @@ import streamlit as st
 from src.shared.market_data import MarketData
 from src.derivatives.instruments import InstrumentFactory
 from src.derivatives.backtester import DeltaHedgingEngine
-from src.shared.ui import render_top_navigation
+from src.shared.ui import render_header
 import pandas as pd
 import datetime
 import plotly.express as px
@@ -11,7 +11,7 @@ import plotly.graph_objects as go
 
 # Configuration de la page
 st.set_page_config(page_title="Pricing & Hedging Engine", layout="wide")
-render_top_navigation()
+render_header()
 st.title("🏦 Advanced Derivatives Pricing Engine")
 
 # --- 1. SIDEBAR : MARKET DATA ---

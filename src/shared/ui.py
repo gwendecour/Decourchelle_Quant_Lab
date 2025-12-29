@@ -1,22 +1,46 @@
 import streamlit as st
 
-def render_top_navigation():
+def render_header():
     """
-    Renders a consistent top navigation bar across all pages.
+    Affiche une barre de navigation horizontale et cache la sidebar native.
     """
-    # Stylized separator
-    st.markdown("---")
-    
-    col1, col2, col3 = st.columns([6, 1, 1])
+    # 1. CSS POUR CACHER LA SIDEBAR ET STYLISER LE HEADER
+    st.markdown("""
+        <style>
+            /* Cacher complètement le 'rideau' (sidebar) et le bouton pour l'ouvrir */
+            [data-testid="stSidebar"] {display: none;}
+            [data-testid="collapsedControl"] {display: none;}
+            
+            /* Style de la barre de navigation */
+            .nav-container {
+                display: flex;
+                justify_content: space-between;
+                align_items: center;
+                padding: 10px 20px;
+                background-color: white;
+                border-bottom: 1px solid #f0f0f0;
+                margin-bottom: 20px;
+            }
+            .nav-logo {
+                font-family: 'Lora', serif;
+                font-size: 1.2rem;
+                font-weight: bold;
+                color: #333;
+                text-decoration: none;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+
+    # 2. BARRE DE NAVIGATION HORIZONTALE
+    # On utilise des colonnes pour aligner gauche (Logo/Home) et droite (CV)
+    col1, col2 = st.columns([5, 1])
     
     with col1:
-        # Link back to Home
-        st.page_link("Home.py", label="🏠 Home / Projects Hub", icon="🔙")
+        # Lien retour maison (simulé par un bouton lien ou text)
+        st.page_link("Home.py", label="🧪 Gwendal Quant Lab", icon="🏠")
         
     with col2:
-        st.page_link("pages/04_📜_Resume_&_Story.py", label="My Resume", icon="📄")
-        
-    with col3:
-        st.link_button("LinkedIn", "https://www.linkedin.com/in/ton-profil") # Remplace par ton lien
+        # Lien vers le CV
+        st.page_link("pages/04_📜_Resume_&_Story.py", label="My Resume & Story", icon="📜")
 
-    st.markdown("---")
+    st.divider()

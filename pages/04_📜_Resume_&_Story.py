@@ -1,8 +1,8 @@
 import streamlit as st
-from src.shared.ui import render_top_navigation
+from src.shared.ui import render_header
 
 st.set_page_config(page_title="My Resume", layout="wide")
-render_top_navigation()
+render_header()
 
 col1, col2 = st.columns([1, 2])
 
