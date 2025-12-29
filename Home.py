@@ -76,7 +76,7 @@ with col1:
         
         st.write("") # Spacer
         if st.button("Explore Pricing Engine", key="btn_pricing"):
-            st.switch_page("pages/01_💎_Derivatives_Pricer.py")
+            st.switch_page("pages/01_Pricing&Hedging_Derivatives.py")
 
 # --- CARTE 2 : INVESTMENT ---
 with col2:
@@ -91,7 +91,7 @@ with col2:
         
         st.write("") # Spacer
         if st.button("Explore Strategies", key="btn_invest"):
-            st.switch_page("pages/02_📈_Investment_Strategy.py")
+            st.switch_page("pages/02_Investment_Strategy.py")
 
 # --- CARTE 3 : VOLATILITY ---
 with col3:
@@ -106,4 +106,4 @@ with col3:
         
         st.write("") # Spacer
         if st.button("Explore Volatility", key="btn_vol"):
-            st.switch_page("pages/03_⚡_Volatility_Estimator.py")
+            st.switch_page("pages/03_Volatility_Estimator.py")
