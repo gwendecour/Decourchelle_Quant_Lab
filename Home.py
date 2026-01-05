@@ -3,7 +3,7 @@ from src.shared.ui import render_header
 
 # --- CONFIGURATION DE LA PAGE ---
 st.set_page_config(
-    page_title="Gwendal Quant Lab",
+    page_title="Gwendal's Lab",
     page_icon="🧪",
     layout="wide",
     initial_sidebar_state="collapsed"
@@ -66,7 +66,7 @@ col1, col2, col3 = st.columns(3, gap="medium")
 with col1:
     # On utilise st.container(border=True) pour créer la boite
     with st.container(border=True):
-        st.markdown("### 💎 Derivatives Pricing")
+        st.markdown("### Derivatives Pricing")
         st.markdown("""
         <div style="height: 120px;">
         Advanced pricing engine for Vanilla and Structured Products (Phoenix Autocall). 
@@ -81,7 +81,7 @@ with col1:
 # --- CARTE 2 : INVESTMENT ---
 with col2:
     with st.container(border=True):
-        st.markdown("### 📈 Investment Strategies")
+        st.markdown("### Investment Strategies")
         st.markdown("""
         <div style="height: 120px;">
         Systematic trading strategy backtester. 
@@ -96,7 +96,7 @@ with col2:
 # --- CARTE 3 : VOLATILITY ---
 with col3:
     with st.container(border=True):
-        st.markdown("### ⚡ Volatility Estimator")
+        st.markdown("### Volatility Estimator")
         st.markdown("""
         <div style="height: 120px;">
         Market Risk engine focused on volatility modeling.
