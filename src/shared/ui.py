@@ -41,6 +41,6 @@ def render_header():
         
     with col2:
         # Lien vers le CV
-        st.page_link("pages/04_Resume_&_Story.py", label="My Resume & Story", icon="📜")
+        st.page_link("pages/04_Resume_&_Story.py", label="My Resume & Story")
 
     st.divider()
