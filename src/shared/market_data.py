@@ -1,101 +1,122 @@
 import yfinance as yf
 import numpy as np
 import pandas as pd
-import requests
-import re
-import json
-
-# ==============================================================================
-# DONNÉES DE SECOURS (BACKUP)
-# Intégrées directement dans le module pour garantir une disponibilité 100%
-# ==============================================================================
-# ==============================================================================
-# DONNÉES DE SECOURS (BACKUP)
-# Intégrées directement dans le module pour garantir une disponibilité 100%
-# ==============================================================================
-BACKUP_JSON_DATA = """
-{
-  "extended": [
-    {
-      "maturityDate": "Dec 2026",
-      "rowc": [
-        {"strike": "55.00", "best_bid": "16.39", "best_ask": "16.68", "last": "16.50", "atTheMoney": false},
-        {"strike": "60.00", "best_bid": "12.95", "best_ask": "13.23", "last": "13.00", "atTheMoney": false},
-        {"strike": "70.00", "best_bid": "7.56", "best_ask": "7.79", "last": "7.65", "atTheMoney": true},
-        {"strike": "75.00", "best_bid": "5.61", "best_ask": "5.81", "last": "5.70", "atTheMoney": false},
-        {"strike": "80.00", "best_bid": "4.09", "best_ask": "4.29", "last": "4.20", "atTheMoney": false},
-        {"strike": "90.00", "best_bid": "2.13", "best_ask": "2.31", "last": "2.20", "atTheMoney": false},
-        {"strike": "100.00", "best_bid": "1.11", "best_ask": "1.23", "last": "1.15", "atTheMoney": false}
-      ],
-      "rowp": [
-        {"strike": "55.00", "best_bid": "3.58", "best_ask": "3.75", "last": "3.65", "atTheMoney": false},
-        {"strike": "60.00", "best_bid": "5.17", "best_ask": "5.34", "last": "5.25", "atTheMoney": false},
-        {"strike": "70.00", "best_bid": "9.69", "best_ask": "9.89", "last": "9.80", "atTheMoney": true},
-        {"strike": "75.00", "best_bid": "12.66", "best_ask": "12.87", "last": "12.75", "atTheMoney": false},
-        {"strike": "80.00", "best_bid": "16.08", "best_ask": "16.30", "last": "16.20", "atTheMoney": false},
-        {"strike": "90.00", "best_bid": "23.99", "best_ask": "24.26", "last": "24.10", "atTheMoney": false},
-        {"strike": "100.00", "best_bid": "32.42", "best_ask": "33.42", "last": "33.00", "atTheMoney": false}
-      ]
-    }
-  ]
-}
-"""
 
 class MarketData:
+    
     @staticmethod
     def get_spot(ticker):
         try:
             stock = yf.Ticker(ticker)
-            # Fast info est souvent plus robuste pour le temps réel
+            # Tente de récupérer le prix temps réel (Fast Info)
             try:
                 price = stock.fast_info.last_price
             except:
                 price = None
                 
+            # Si échec, repli sur la clôture de la veille
             if price is None:
-                price = stock.history(period="1d")['Close'].iloc[-1]
+                hist = stock.history(period="1d")
+                if not hist.empty:
+                    price = hist['Close'].iloc[-1]
+                else:
+                    return None 
             return price
         except Exception as e:
-            print(f"Error fetching Spot: {e}. Defaulting to 100.")
-            return 100.0
+            print(f"Error fetching Spot for {ticker}: {e}")
+            return None
 
     @staticmethod
     def get_volatility(ticker, window="1y"):
+        """
+        Calcule la volatilité historique annualisée (Close-to-Close).
+        """
         try:
             stock = yf.Ticker(ticker)
             hist = stock.history(period=window)
+            
+            if hist.empty:
+                return 0.20 # Valeur par défaut si échec
+            
+            # Calcul des rendements log : ln(Pt / Pt-1)
             hist['Log_Ret'] = np.log(hist['Close'] / hist['Close'].shift(1))
+            
+            # Écart-type annualisé
             annualized_vol = hist['Log_Ret'].std() * np.sqrt(252)
+            
+            if np.isnan(annualized_vol):
+                return 0.20
+                
             return annualized_vol
         except Exception as e:
+            print(f"Error volatility: {e}")
             return 0.20
 
     @staticmethod
     def get_dividend_yield(ticker):
+        """
+        Récupère le rendement du dividende et corrige l'échelle (ex: 2.46 -> 0.0246).
+        """
         try:
             stock = yf.Ticker(ticker)
             div_yield = stock.info.get('dividendYield', 0.0)
+            
             if div_yield is None:
                 return 0.0
+            
+            # SÉCURITÉ CRITIQUE :
+            # Si Yahoo renvoie "2.46" pour 2.46%, on divise par 100.
+            # On assume qu'aucun dividende ne dépasse 50% (0.5).
+            if div_yield > 0.5:
+                div_yield = div_yield / 100.0
+                
             return div_yield 
         except Exception as e:
             return 0.0
         
     @staticmethod
     def get_risk_free_rate(ticker="^TNX"):
+        """
+        Récupère le taux sans risque via le CBOE 10-Year Treasury Note Yield (^TNX).
+        Yahoo donne le taux en %, ex: 4.20. Nous le convertissons en 0.042.
+        """
         try:
+            # ^TNX est l'indice de référence du rendement
             bond = yf.Ticker(ticker)
-            yield_index = bond.history(period="1d")['Close'].iloc[-1]
-            return yield_index / 100
+            hist = bond.history(period="1d")
+            
+            if not hist.empty:
+                # La valeur affichée est en pourcentage (ex: 4.25 pour 4.25%)
+                yield_value = hist['Close'].iloc[-1]
+                return yield_value / 100.0 
+            
+            return 0.03 # Fallback à 3%
         except Exception as e:
+            print(f"Error fetching risk free rate: {e}")
             return 0.03
     
     @staticmethod
+    def get_historical_data(ticker, start_date, end_date):
+        try:
+            stock = yf.Ticker(ticker)
+            df = stock.history(start=start_date, end=end_date)
+            if df.empty: return None
+            return df['Close']
+        except Exception as e:
+            return None
+
+    # ==========================================================================
+    # OBSOLETE / MAINTENANCE : EURONEXT CHAIN
+    # Désactivé temporairement car l'API Euronext bloque les requêtes automatisées
+    # ==========================================================================
+    """
+
+    @staticmethod
     def get_euronext_chain(root_ticker="GL1", exchange="DPAR", maturity="12-2026"):
-        """
+    
         Récupère la chaîne d'options. 
         Tente d'abord Euronext Live, et bascule sur le BACKUP JSON si échec.
-        """
+        
         url = f"https://live.euronext.com/en/ajax/getPricesOptionsAjax/stock-options/{root_ticker}/{exchange}"
         
         # Headers "Naviguateur Réel" pour éviter le blocage 403
@@ -226,3 +247,4 @@ class MarketData:
             return df['Close']
         except Exception as e:
             return None
+            """
