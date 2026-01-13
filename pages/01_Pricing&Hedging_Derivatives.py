@@ -7,7 +7,8 @@ import datetime
 # Import de tes modules customs
 from src.shared.market_data import MarketData
 from src.derivatives.instruments import InstrumentFactory
-from src.derivatives.pricing_model import BlackScholesPricer, MonteCarloEngine
+from src.derivatives.pricing_model import EuropeanOption
+from src.derivatives.monte_carlo import MonteCarloEngine
 from src.derivatives.structured_products import PhoenixStructure
 from src.derivatives.backtester import DeltaHedgingEngine
 
@@ -120,48 +121,40 @@ with tab1:
 
     st.write("") # Spacer
     
-    # Bouton d'action principal
+   # Bouton d'action principal
     if st.button("🚀 Launch Phoenix Pricing (Monte Carlo)", type="primary", use_container_width=True):
         with st.spinner("Running Monte Carlo simulations..."):
-            # 1. Instanciation du produit Structured
-            # NOTE: Pour simplifier ici, on met le strike initial = strike autocall = spot actuel
-            strike_price_struct = spot_price
             
+            # Dans ta classe PhoenixStructure, les paramètres MC sont passés à l'init
+            # car elle hérite de MonteCarloEngine
             phoenix = PhoenixStructure(
-                maturity=maturity_years,
-                strike=strike_price_struct,
-                barrier_level=barrier_level,
-                autocall_level=autocall_level,
+                S=spot_price,              # Spot actuel
+                T=maturity_years,          # Maturité
+                r=risk_free_rate,          # Taux
+                sigma=volatility,          # Volatilité
+                q=dividend_yield,          # Dividende
+                autocall_barrier=autocall_level_pct, # En % (ex: 1.0)
+                protection_barrier=barrier_level_pct, # En % (ex: 0.70)
+                coupon_barrier=barrier_level_pct,     # En %
                 coupon_rate=coupon_rate,
-                observation_frequency='monthly' # Fixé pour l'instant
+                obs_frequency=12,          # Mensuel (hardcodé pour simplifier)
+                num_simulations=n_sims_pricing
             )
             
-            # 2. Moteur Monte Carlo
-            mc_engine = MonteCarloEngine(
-                spot=spot_price,
-                vol=volatility,
-                rate=risk_free_rate,
-                div=dividend_yield,
-                n_sims=n_sims_pricing,
-                n_steps=int(maturity_years * 252) # steps journaliers
-            )
-            
-            # 3. Pricing
-            price, std_error = phoenix.price(mc_engine)
+            # Calcul du prix
+            # Ta méthode price() ne prend pas d'argument et retourne juste le prix
+            price = phoenix.price()
             
             # 4. Affichage Résultats
             st.markdown("### Pricing Results")
-            res_col1, res_col2, res_col3 = st.columns(3)
+            res_col1, res_col2 = st.columns(2)
             with res_col1:
                  st.metric("Fair Value (Price)", f"{price:.2f} €")
             with res_col2:
                  st.metric("Price in % of Notional", f"{(price/spot_price)*100:.2f} %")
-            with res_col3:
-                 st.metric("MC Standard Error", f"{std_error:.4f}")
 
             st.info(f"Note: Product notionally based on Spot Price ({spot_price}). Barrier at {barrier_level:.2f}, Autocall at {autocall_level:.2f}.")
-            st.success("Pricing complete based on risk-neutral measure evaluation of future cashflows.")
-
+            st.success("Pricing complete.")
 
 # --- TAB 2: GREEKS ANALYSIS (Vanilla Focus) ---
 with tab2:
