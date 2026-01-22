@@ -1,5 +1,6 @@
 import numpy as np
 import plotly.graph_objects as go
+from scipy.interpolate import make_interp_spline
 from src.derivatives.monte_carlo import MonteCarloEngine
 from src.derivatives.instruments import FinancialInstrument
 import plotly.express as px
@@ -27,7 +28,8 @@ class PhoenixStructure(MonteCarloEngine, FinancialInstrument):
         self.steps = steps
         
         num_simulations = kwargs.get('num_simulations', 10000)
-        
+        self.num_simulations = num_simulations
+
         # 3. Init Moteur Monte Carlo (Parent 1)
         MonteCarloEngine.__init__(self, 
             S=S, K=S, T=maturity, 
@@ -93,63 +95,64 @@ class PhoenixStructure(MonteCarloEngine, FinancialInstrument):
         payoffs = self.calculate_payoffs_distribution()
         return np.mean(payoffs)
 
-    def plot_payoff(self, spot_range):
+    def plot_payoff(self, spot_range=None):
         """
-        Génère le graphique de profitabilité à maturité (Vision Structurer/Client).
-        Montre la barrière et le saut de rendement (Coupon).
+        Plots the Phoenix payoff at maturity.
+        CORRECTED: Uses absolute barrier levels from __init__.
         """
-        spots = np.linspace(spot_range[0], spot_range[1], 300)
+        # 1. Recuperation des Barrieres (Déjà en absolu dans votre __init__)
+        prot_level = self.protection_barrier 
+        cpn_level = self.coupon_barrier
+        
+        # 2. Dynamic Range
+        # On descend assez bas pour bien voir la barrière PDI
+        low_bound = min(self.S * 0.3, prot_level * 0.8)
+        high_bound = self.S * 1.5
+        spots = np.linspace(low_bound, high_bound, 200)
         payoffs = []
         
-        # Calcul du remboursement total en cas de succès (Nominal + Coupon Annuel)
-        # C'est ce que le client voit : "Si c'est au dessus, je prends 110%"
-        success_payoff = self.nominal * (1 + self.coupon_rate)
-        
         for s in spots:
-            if s < self.protection_barrier:
-                # SCENARIO CRASH : On récupère l'action (perte en capital)
-                payoffs.append(s)
-            
-            elif s < self.coupon_barrier:
-                # SCENARIO NEUTRE (Rare) : Au dessus protection mais sous coupon
-                # On récupère 100% du capital mais pas de coupon
-                payoffs.append(self.nominal)
-                
+            # Payoff Logic at Maturity
+            if s >= cpn_level:
+                # Scénario favorable : Capital + Coupon
+                val = 1.0 + self.coupon_rate 
+            elif s >= prot_level:
+                # Scénario neutre : Capital protégé
+                val = 1.0
             else:
-                # SCENARIO GAGNANT : Capital + Coupon
-                # C'est ici qu'on crée la marche d'escalier vers 110% (ou autre)
-                payoffs.append(success_payoff)
-        
-        # Conversion en % du nominal pour l'affichage
-        payoffs_pct = (np.array(payoffs) / self.nominal) * 100
-        current_price_pct = (self.price() / self.nominal) * 100
-        
+                # Scénario perte : PDI (Put Down In)
+                val = s / self.S
+            
+            payoffs.append(val * 100) # En pourcentage du nominal
+
+        # 3. Plot
         fig = go.Figure()
         
-        # Trace du Payoff (Cyan)
+        # Trace Payoff
         fig.add_trace(go.Scatter(
-            x=spots, y=payoffs_pct, 
-            mode='lines', name='Remboursement Final', 
-            line=dict(color='cyan', width=3)
+            x=spots, y=payoffs, 
+            mode='lines', 
+            name=' ', # ASTUCE : Espace vide pour éviter "undefined" au survol
+            line=dict(color='#00CC96', width=3),
+            hovertemplate="Spot: %{x:.2f}<br>Payoff: %{y:.1f}%<extra></extra>"
         ))
-        
-        # Barrières
-        fig.add_vline(x=self.protection_barrier, line_dash="dash", line_color="red", annotation_text="Protection")
-        
-        if self.coupon_barrier != self.protection_barrier:
-            fig.add_vline(x=self.coupon_barrier, line_dash="dot", line_color="yellow", annotation_text="Coupon Trigger")
-            
-        fig.add_vline(x=self.autocall_barrier, line_dash="dash", line_color="green", annotation_text="Autocall")
-        
-        # Ligne 100%
-        fig.add_hline(y=100, line_color="gray", line_width=1, annotation_text="Capital Initial")
 
+        # Barrières Verticales
+        fig.add_vline(x=prot_level, line_dash="dash", line_color="red", 
+                      annotation_text=f"Prot: {prot_level:.2f}")
+        
+        fig.add_vline(x=cpn_level, line_dash="dash", line_color="orange", 
+                      annotation_text=f"Cpn: {cpn_level:.2f}", annotation_position="top")
+
+        # Mise en page propre
         fig.update_layout(
-            title=f"Profil à Maturité (Prix Actuel: {current_price_pct:.2f}%)",
-            xaxis_title="Prix du Sous-jacent",
-            yaxis_title="Remboursement (% Nominal)",
-            template="plotly_dark",
-            yaxis=dict(range=[0, max(payoffs_pct)*1.15]) # Marge en haut pour voir le coupon
+            title=" ",
+            xaxis_title="Spot Price at Maturity",
+            yaxis_title="Payoff (% Nominal)",
+            template="plotly_white",
+            height=350,
+            margin=dict(l=20, r=20, t=20, b=20),
+            hovermode="x unified"
         )
         return fig
 
@@ -377,3 +380,166 @@ class PhoenixStructure(MonteCarloEngine, FinancialInstrument):
             bargap=0.1
         )
         return fig
+    
+    def plot_price_vs_strike(self, current_spot):
+        """
+        Trace le prix du Phoenix en fonction du niveau de Strike/Spot initial.
+        Pour un produit structuré, varier le Strike revient à varier le niveau de Moneyness initial.
+        """
+        # On simule des variations du Spot initial de 50% à 150%
+        spots = np.linspace(current_spot * 0.5, current_spot * 1.5, 50)
+        prices = []
+        
+        # Sauvegarde du spot actuel
+        original_S = self.S
+        
+        # Calcul pour chaque spot
+        for s in spots:
+            self.S = s
+            # IMPORTANT: Pour le Phoenix, les barrières sont absolues.
+            # Si le spot change, la "distance" aux barrières change.
+            # On suppose ici que les barrières RESTENT FIXES (produit déjà émis).
+            prices.append(self.price())
+            
+        # Restauration
+        self.S = original_S
+        current_price = self.price()
+        
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=spots, y=prices, mode='lines', name='Price', line=dict(color='royalblue', width=2)))
+        fig.add_trace(go.Scatter(x=[current_spot], y=[current_price], mode='markers', name='Current Spot', marker=dict(color='red', size=10)))
+        
+        fig.update_layout(
+            title=" ",
+            xaxis_title="Spot Price",
+            yaxis_title="Phoenix Price",
+            template="plotly_white",
+            height=300,
+            margin=dict(l=40, r=20, t=30, b=40)
+        )
+        return fig
+
+    def plot_price_vs_vol(self, current_vol):
+        """
+        Trace le prix du Phoenix en fonction de la Volatilité.
+        """
+        vols = np.linspace(0.05, 0.60, 30) # De 5% à 60% de vol
+        prices = []
+        
+        original_sigma = self.sigma
+        
+        for v in vols:
+            self.sigma = v
+            prices.append(self.price())
+            
+        self.sigma = original_sigma
+        current_price = self.price()
+        
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=vols*100, y=prices, mode='lines', name='Price', line=dict(color='orange', width=2)))
+        fig.add_trace(go.Scatter(x=[current_vol*100], y=[current_price], mode='markers', name='Current Vol', marker=dict(color='red', size=10)))
+        
+        fig.update_layout(
+            title=" ",
+            xaxis_title="Volatility (%)",
+            yaxis_title="Phoenix Price",
+            template="plotly_white",
+            height=300,
+            margin=dict(l=40, r=20, t=30, b=40)
+        )
+        return fig
+    
+    def calculate_delta_quick(self, n_sims=2000):
+        """
+        Calcule une approximation rapide du Delta pour l'affichage temps réel.
+        Utilise moins de simulations (n_sims) pour ne pas bloquer l'interface Streamlit.
+        """
+        # 1. Sauvegarde de l'état initial
+        original_N = self.N
+        original_S = self.S
+        original_seed = self.seed if self.seed is not None else 42
+        
+        # 2. Configuration "Light"
+        self.N = n_sims
+        epsilon = self.S * 0.01 # Choc de 1%
+        
+        # 3. Calcul Prix UP
+        self.S = original_S + epsilon
+        self.seed = original_seed # Important: même seed pour réduire la variance
+        price_up = self.price()
+        
+        # 4. Calcul Prix DOWN
+        self.S = original_S - epsilon
+        self.seed = original_seed
+        price_down = self.price()
+        
+        # 5. Restauration de l'état
+        self.S = original_S
+        self.N = original_N
+        self.seed = original_seed
+        
+        # 6. Calcul Delta (Différences finies centrées)
+        delta = (price_up - price_down) / (2 * epsilon)
+        
+        return delta
+    
+    def compute_scenario_matrices(self, spot_range_pct, vol_range_abs, n_spot, n_vol, matrix_sims=1000):
+        """
+        Calcule les matrices de P&L pour les Heatmaps (Scénarios Spot/Vol).
+        Optimisation : Utilise 'matrix_sims' (ex: 1000) au lieu de self.N pour la rapidité.
+        """
+        # 1. Sauvegarde État Initial
+        original_N = self.N
+        original_S = self.S
+        original_sigma = self.sigma
+        original_seed = self.seed if self.seed is not None else 42
+        
+        # On passe en mode "Rapide" pour la matrice
+        self.N = matrix_sims
+        
+        # 2. Calculs de Référence (Point central 0,0)
+        self.seed = original_seed
+        initial_price = self.price()
+        
+        # Pour le hedge, on a besoin du Delta initial.
+        # On utilise notre méthode rapide
+        initial_delta = self.calculate_delta_quick(n_sims=matrix_sims)
+
+        # 3. Création des Axes
+        spot_moves = np.linspace(-spot_range_pct, spot_range_pct, int(n_spot))
+        vol_moves = np.linspace(-vol_range_abs, vol_range_abs, int(n_vol))
+
+        # 4. Initialisation Matrices
+        matrix_unhedged = np.zeros((len(vol_moves), len(spot_moves)))
+        matrix_hedged = np.zeros((len(vol_moves), len(spot_moves)))
+
+        # 5. Boucle de Calcul (Grid Pricing)
+        for i, v_chg in enumerate(vol_moves):
+            for j, s_chg in enumerate(spot_moves):
+                
+                # Mise à jour Scénario
+                self.S = original_S * (1 + s_chg)
+                self.sigma = max(0.01, original_sigma + v_chg) # Sécurité vol > 1%
+                self.seed = original_seed # Important: figer le seed pour comparer des pommes avec des pommes
+                
+                # Pricing Scénario
+                new_price = self.price()
+
+                # --- CALCUL P&L BANQUE (SHORT) ---
+                # P&L = Prix Vente (Initial) - Prix Rachat (Nouveau)
+                pnl_opt = initial_price - new_price
+                
+                # --- CALCUL HEDGE (LONG ACTIONS) ---
+                # Hedge P&L = Delta * Variation Spot
+                pnl_shares = initial_delta * (self.S - original_S)
+                
+                matrix_unhedged[i, j] = pnl_opt
+                matrix_hedged[i, j] = pnl_opt + pnl_shares
+
+        # 6. Restauration État Initial
+        self.N = original_N
+        self.S = original_S
+        self.sigma = original_sigma
+        self.seed = original_seed
+
+        return matrix_unhedged, matrix_hedged, spot_moves, vol_moves

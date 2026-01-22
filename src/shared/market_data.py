@@ -98,10 +98,18 @@ class MarketData:
     @staticmethod
     def get_historical_data(ticker, start_date, end_date):
         try:
+            # On suppose que yfinance est importé en haut ou ici
+            # import yfinance as yf 
             stock = yf.Ticker(ticker)
             df = stock.history(start=start_date, end=end_date)
-            if df.empty: return None
-            return df['Close']
+            
+            if df.empty: 
+                return None
+            
+            # CORRECTION ICI : On renvoie tout le DataFrame
+            # Cela évite l'erreur "Series object has no attribute 'columns'" dans l'interface
+            return df 
+            
         except Exception as e:
             return None
 

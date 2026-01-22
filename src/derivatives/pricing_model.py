@@ -115,13 +115,13 @@ class EuropeanOption(FinancialInstrument):
         fig.add_vline(
             x=self.S, 
             line_dash="dot", line_color="cyan", 
-            annotation_text=f"Spot Actuel ({self.S:.1f})", annotation_position="bottom right"
+            annotation_text=f"Current Spot ({self.S:.1f})", annotation_position="bottom right"
         )
 
         fig.update_layout(
-            title=f"Profil de P&L à Maturité (Prime = {premium:.2f}€)",
-            xaxis_title="Prix du Sous-jacent à Maturité",
-            yaxis_title="Profit / Perte (€)",
+            title=f" ",
+            xaxis_title="Underlying price at maturity",
+            yaxis_title="Profit / Loss (€)",
             template="plotly_dark", # Thème sombre pour faire ressortir le Vert/Rouge
             hovermode="x unified",   # Pour voir les deux valeurs en même temps au survol
             legend=dict(
@@ -162,28 +162,29 @@ class EuropeanOption(FinancialInstrument):
         fig.add_trace(go.Scatter(
             x=strikes, y=prices, 
             mode='lines', 
-            name='Prix Théorique',
-            line=dict(color='royalblue', width=2)
-        ))
+            name='Theoric Prices',
+            line=dict(color='royalblue', width=2)))
         
         # Le point rouge (Notre configuration actuelle)
         fig.add_trace(go.Scatter(
             x=[current_k], y=[current_price],
             mode='markers',
-            name='Votre Sélection',
-            marker=dict(color='red', size=12, line=dict(color='white', width=2))
-        ))
+            name='Your Selection',
+            marker=dict(color='red', size=12, line=dict(color='white', width=2))))
         
         # Lignes guides
-        fig.add_vline(x=current_spot, line_dash="dot", line_color="gray", annotation_text="Spot Actuel")
+        fig.add_vline(x=current_spot, line_dash="dot", line_color="gray", annotation_text="Current Spot")
 
         fig.update_layout(
-            title="Sensibilité du Prix au Strike (Moneyness)",
-            xaxis_title="Strike Price (K)",
-            yaxis_title="Prime de l'Option (€)",
-            template="plotly_dark",
+            title=" ", 
+            xaxis_title="Strike Price",
+            yaxis_title="Option Price (€)",
+            template="plotly_white",
+            height=300, # Hauteur fixe
+            margin=dict(l=40, r=20, t=10, b=40), # Marges strictes
             hovermode="x unified",
-            showlegend=True
+            showlegend=True,
+            legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99)
         )
         
         return fig
@@ -252,4 +253,162 @@ class EuropeanOption(FinancialInstrument):
         # Ligne verticale du Spot actuel
         fig.add_vline(x=self.S, line_dash="dot", line_color="gray", annotation_text="Spot Actuel")
 
+        return fig
+    
+    def plot_price_vs_vol(self, current_vol):
+        """Trace le prix en fonction de la Volatilité (Vega View)"""
+        vols = np.linspace(0.05, 0.80, 50) # De 5% à 80% de vol
+        prices = []
+        
+        for v in vols:
+            tmp = EuropeanOption(S=self.S, K=self.K, T=self.T, r=self.r, sigma=v, q=self.q, option_type=self.option_type)
+            prices.append(tmp.price())
+            
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=vols*100, y=prices, mode='lines', name='Price', line=dict(color='orange', width=3)))
+        
+        # Point actuel
+        curr_price = self.price()
+        fig.add_trace(go.Scatter(x=[current_vol*100], y=[curr_price], mode='markers', name='Current Vol', 
+                                 marker=dict(color='red', size=12, line=dict(color='white', width=2))))
+        
+        fig.update_layout(
+            title=" ", 
+            xaxis_title="Volatility (%)",
+            yaxis_title="Option Price (€)",
+            template="plotly_white",
+            height=300,
+            margin=dict(l=40, r=20, t=10, b=40), # Mêmes marges = Même alignement Y
+            showlegend=True,
+            legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99)
+        )
+        return fig
+    
+    def compute_scenario_matrices(self, spot_range_pct, vol_range_abs, n_spot, n_vol, matrix_sims=None):
+        """
+        Calcule les matrices de P&L.
+        Note: L'argument 'matrix_sims' est présent pour la compatibilité avec l'interface
+        (polymorphisme avec PhoenixStructure) mais n'est pas utilisé ici car le pricing est analytique.
+        """
+        # 1. État Initial
+        initial_price = self.price()
+        initial_delta = self.delta() 
+
+        # 2. Création des axes (Ranges)
+        spot_moves = np.linspace(-spot_range_pct, spot_range_pct, int(n_spot))
+        vol_moves = np.linspace(-vol_range_abs, vol_range_abs, int(n_vol))
+
+        # 3. Initialisation
+        matrix_unhedged = np.zeros((len(vol_moves), len(spot_moves)))
+        matrix_hedged = np.zeros((len(vol_moves), len(spot_moves)))
+
+        # 4. Boucle de Calcul
+        for i, v_chg in enumerate(vol_moves):
+            for j, s_chg in enumerate(spot_moves):
+                
+                # Nouveaux paramètres
+                new_S = self.S * (1 + s_chg)
+                new_vol = self.sigma + v_chg
+                
+                if new_vol < 0.001: new_vol = 0.001
+
+                # Pricing du nouveau scénario
+                scenario_opt = EuropeanOption(
+                    S=new_S, K=self.K, T=self.T, r=self.r, sigma=new_vol, q=self.q, option_type=self.option_type
+                )
+                new_price = scenario_opt.price()
+
+                # P&L
+                pnl_opt = -(new_price - initial_price)
+                pnl_shares = initial_delta * (new_S - self.S)
+                
+                matrix_unhedged[i, j] = pnl_opt
+                matrix_hedged[i, j] = pnl_opt + pnl_shares
+
+        return matrix_unhedged, matrix_hedged, spot_moves, vol_moves
+    
+
+    def plot_greeks_profile(self):
+        """
+        Génère les graphes structurels (Delta, Gamma, Vega) avec :
+        - Échelle Fixe : 0 à 200% du Strike.
+        - Vue Banque : Signes inversés.
+        - Indicateurs : Strike (Gris) et Spot Actuel (Rouge).
+        - PAS DE THETA.
+        """
+        import numpy as np
+        import plotly.graph_objects as go
+        from plotly.subplots import make_subplots
+
+        # 1. Définition de la plage fixe (0 à 200% du Strike)
+        lower_bound = 0.01
+        upper_bound = self.K * 2.0
+        spots = np.linspace(lower_bound, upper_bound, 100)
+        
+        deltas, gammas, vegas = [], [], []
+        
+        # Sauvegarde de l'état actuel (Le point rouge)
+        current_S = self.S
+        
+        # 2. Calculs de la courbe
+        for s in spots:
+            self.S = s
+            # Récupération des Grecs bruts
+            d = self.delta()
+            g = self.gamma()
+            v = self.vega_point() # ou self.vega() selon votre implémentation
+            
+            # Inversion VUE BANQUE (Short)
+            deltas.append(-d)
+            gammas.append(-g)
+            vegas.append(-v)
+            
+        # Restauration du spot pour ne pas casser l'objet
+        self.S = current_S
+        
+        # Calcul des valeurs exactes actuelles pour le point rouge
+        curr_vals = {
+            'Delta': -self.delta(),
+            'Gamma': -self.gamma(),
+            'Vega': -self.vega_point()
+        }
+
+        # 3. Création du Graphique (3 Lignes, 1 Colonne)
+        fig = make_subplots(
+            rows=3, cols=1, 
+            subplot_titles=("Delta (Δ)", "Gamma (Γ)", "Vega (ν)"),
+            shared_xaxes=True, # Axe X partagé pour mieux comparer
+            vertical_spacing=0.05
+        )
+
+        # Helper pour tracer proprement
+        def add_trace_with_markers(row, col, x_data, y_data, name, current_val):
+            # A. La Courbe Bleue
+            fig.add_trace(go.Scatter(x=x_data, y=y_data, mode='lines', name=name, 
+                                     line=dict(color='#1f77b4', width=2), showlegend=False), 
+                          row=row, col=col)
+            
+            # B. Le Strike (Ligne pointillée Grise)
+            fig.add_vline(x=self.K, line_width=1, line_dash="dash", line_color="gray", row=row, col=col)
+            
+            # Annotation Strike (uniquement sur le dernier graph pour clarté)
+            if row == 3: 
+                 fig.add_annotation(x=self.K, y=min(y_data), text="Strike", showarrow=False, yshift=-10, font=dict(size=10, color="gray"), row=row, col=col)
+
+            # C. Le Spot Actuel (Point Rouge)
+            fig.add_trace(go.Scatter(
+                x=[current_S], y=[current_val], mode='markers', 
+                marker=dict(color='red', size=8, symbol='circle'),
+                name="Current", showlegend=False
+            ), row=row, col=col)
+
+        # Ajout des 3 traces (Delta, Gamma, Vega)
+        add_trace_with_markers(1, 1, spots, deltas, "Delta", curr_vals['Delta'])
+        add_trace_with_markers(2, 1, spots, gammas, "Gamma", curr_vals['Gamma'])
+        add_trace_with_markers(3, 1, spots, vegas, "Vega", curr_vals['Vega'])
+
+        # Mise en page finale
+        fig.update_layout(height=700, title_text="Greeks Structural Profile (Bank View)", margin=dict(t=60, b=20, l=20, r=20))
+        fig.update_xaxes(title_text="Spot Price", range=[0, upper_bound], row=3, col=1)
+        
         return fig

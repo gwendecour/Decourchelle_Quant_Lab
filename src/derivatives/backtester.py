@@ -4,145 +4,264 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from src.shared.market_data import MarketData
+# Les imports suivants ne sont plus strictement nécessaires ici si on passe l'objet option, 
+# mais on les garde pour la compatibilité de type si besoin.
 from src.derivatives.structured_products import PhoenixStructure
 from src.derivatives.pricing_model import EuropeanOption 
 
 class DeltaHedgingEngine:
-    def __init__(self, ticker, start_date, end_date, product_params):
-        self.ticker = ticker
-        self.start_date = start_date
-        self.end_date = end_date
-        self.product_params = product_params
+    def __init__(self, option, market_data, risk_free_rate, dividend_yield, volatility, transaction_cost=0.0, rebalancing_freq="daily"):
+        """
+        Engine for backtesting delta hedging strategies.
         
-        # État du Portefeuille
-        self.cash = 0.0           
-        self.shares_held = 0.0    
-        self.portfolio_value = [] 
-        self.history = []         
-        self.spot_series = None 
-        self.attribution_history = [] 
-
-    def fetch_data(self):
-        data = MarketData.get_historical_data(self.ticker, self.start_date, self.end_date)
-        if data is None or data.empty:
-            raise ValueError(f"CRITICAL: No data found for {self.ticker}.")
-        self.spot_series = data
-        print(f"--> Backtest Engine: Loaded {len(data)} trading days.")
-        return data
-
-    def run_simulation(self):
-        if self.spot_series is None:
-            self.fetch_data()
-            
-        print(f"--- Starting Delta Hedging ({self.product_params.get('type', 'Unknown')}) ---")
+        :param option: Instrument object (EuropeanOption or PhoenixStructure) DEJA INSTANCIÉ
+        :param market_data: DataFrame containing historical data (must have 'Close')
+        :param risk_free_rate: Annual risk-free rate (r)
+        :param dividend_yield: Annual dividend yield (q)
+        :param volatility: Fixed volatility to use for pricing (sigma)
+        :param transaction_cost: Proportional transaction cost (e.g. 0.001 for 0.1%)
+        """
+        self.option = option
         
-        # 1. Initial Setup
-        initial_spot = self.spot_series.iloc[0]
-        params = self.product_params
-        
-        # Déduction du type si non explicite
-        if 'type' not in params:
-            prod_type = 'phoenix' if 'coupon_rate' in params else 'call'
+        # --- GESTION ROBUSTE DES DONNEES (DataFrame vs Series) ---
+        if isinstance(market_data, pd.DataFrame):
+            if 'Close' in market_data.columns:
+                self.spot_series = market_data['Close']
+            else:
+                # Fallback: on prend la première colonne si pas de 'Close'
+                self.spot_series = market_data.iloc[:, 0]
+        elif isinstance(market_data, pd.Series):
+            self.spot_series = market_data
         else:
-            prod_type = params.get('type', 'phoenix').lower()
+            raise ValueError("market_data must be a pandas DataFrame or Series")
+            
+        self.r = risk_free_rate
+        self.q = dividend_yield
+        self.sigma = volatility
+        self.tc = transaction_cost
+        self.dt = 1/252.0 # Hypothèse journalière
         
-        # Variables spécifiques au produit
-        fixed_auto_lvl, fixed_prot_lvl, fixed_coup_lvl = 0, 0, 0
-        strike = 0
-        nominal = initial_spot 
-
-        # CONFIGURATION INITIALE SELON LE TYPE DE PRODUIT
-        if prod_type == 'phoenix':
-            fixed_auto_lvl = initial_spot * params.get('autocall_barrier', 1.0)
-            fixed_prot_lvl = initial_spot * params.get('protection_barrier', 0.6)
-            fixed_coup_lvl = initial_spot * params.get('coupon_barrier', 0.6)
-        
-        elif prod_type in ['call', 'put']:
-            if 'strike_pct' in params:
-                strike = initial_spot * params['strike_pct']
-            else:
-                strike = params.get('K', initial_spot)
-            print(f"Product: {prod_type.upper()} | Strike: {strike:.2f}")
-
-        # Initialize History Containers & Previous State
-        self.attribution_history = []
-        self.portfolio_value = []
+        # Résultats
         self.history = []
-        
-        prev_spot = initial_spot
-        prev_price = 0.0
-        prev_delta = 0.0
-        prev_gamma = 0.0
-        prev_vega = 0.0
-        prev_theta = 0.0
-        
-        current_vol = params.get('vol', params.get('sigma', 0.20))
-        
-        # --- BOUCLE PRINCIPALE ---
-        for i, (date, current_spot) in enumerate(self.spot_series.items()):
-            
-            # A. Time to Maturity
-            days_remaining = len(self.spot_series) - i
-            T_current = max(days_remaining / 252.0, 0.001) 
-            
-            # B. Calculate Greeks (ROUTAGE INTELLIGENT)
-            ctx = {
-                'spot': current_spot, 'T': T_current, 'vol': current_vol,
-                'auto': fixed_auto_lvl, 'prot': fixed_prot_lvl, 'coup': fixed_coup_lvl,
-                'nom': nominal, 'strike': strike, 'type': prod_type,
-                'params': params 
-            }
-            
-            price, delta, gamma, vega, theta = self._calculate_greeks_at_date(ctx)
-            
-            # C. Trading Logic
-            if i == 0:
-                # DAY 0
-                self.cash += price 
-                self.shares_held = delta
-                cost_of_hedge = self.shares_held * current_spot
-                self.cash -= cost_of_hedge
-                
-                prev_price, prev_delta, prev_gamma, prev_vega, prev_theta, prev_spot = \
-                    price, delta, gamma, vega, theta, current_spot
-                
-            else:
-                # --- P&L ATTRIBUTION ---
-                dS = current_spot - prev_spot
-                pnl_delta = prev_delta * dS
-                pnl_gamma = - 0.5 * prev_gamma * (dS**2) 
-                pnl_vega  = prev_vega * 0 
-                pnl_theta = -prev_theta 
-                
-                predicted_pnl = pnl_delta + pnl_gamma + pnl_vega + pnl_theta
-                actual_pnl_product = price - prev_price
-                unexplained = actual_pnl_product - predicted_pnl
-                
-                self.attribution_history.append({
-                    "Date": date, "Actual_PnL": actual_pnl_product, "Predicted_PnL": predicted_pnl,
-                    "Delta_PnL": pnl_delta, "Gamma_PnL": pnl_gamma, "Theta_PnL": pnl_theta, "Unexplained": unexplained
-                })
-                
-                # --- REBALANCING ---
-                target_shares = delta
-                trade_size = target_shares - self.shares_held
-                self.cash -= (trade_size * current_spot)
-                self.shares_held = target_shares
-                
-                # Update Prev State
-                prev_price, prev_delta, prev_gamma, prev_vega, prev_theta, prev_spot = \
-                    price, delta, gamma, vega, theta, current_spot
+        self.results = None
 
-            # D. Mark-to-Market
-            assets = self.cash + (self.shares_held * current_spot)
-            liability = price
-            pnl = assets - liability
-            self.portfolio_value.append(pnl)
+    def run_backtest(self):
+        spots = self.spot_series.values
+        dates = self.spot_series.index
+        n_days = len(spots)
+        
+        # --- INIT PARAMS ---
+        contract_maturity = self.option.T 
+        
+        # Paramètres Phoenix
+        is_phoenix = hasattr(self.option, 'autocall_barrier')
+        obs_freq = getattr(self.option, 'obs_frequency', 4) 
+        days_between_obs = int(252 / obs_freq) if obs_freq > 0 else 99999
+        
+        ac_barrier = getattr(self.option, 'autocall_barrier', 999999)
+        cpn_barrier = getattr(self.option, 'coupon_barrier', 0)
+        nominal = getattr(self.option, 'nominal', spots[0])
+        coupon_amount = nominal * getattr(self.option, 'coupon_rate', 0) / obs_freq if obs_freq > 0 else 0
+
+        # Containers
+        portfolio_values = np.full(n_days, np.nan)
+        cash_account = np.zeros(n_days)
+        shares_held = np.zeros(n_days)
+        deltas = np.zeros(n_days)
+        option_prices = np.zeros(n_days)
+        
+        # --- T=0 (LANCEMENT) ---
+        s0 = spots[0]
+        self.option.S = s0
+        self.option.T = contract_maturity
+        self.option.sigma = self.sigma
+        
+        if hasattr(self.option, 'calculate_delta_quick'):
+             init_delta = self.option.calculate_delta_quick(n_sims=5000)
+             init_price = self.option.price()
+        else:
+             init_price = self.option.price()
+             init_delta = self.option.delta()
+        
+        # LOGIQUE DECOMPOSÉE
+        initial_premium = init_price
+        initial_hedge_cost = (init_delta * s0)
+        initial_fees = abs(initial_hedge_cost) * self.tc
+        
+        # Cash = Prime - Coût Hedge - Frais
+        initial_cash = initial_premium - initial_hedge_cost - initial_fees
+        
+        cash_account[0] = initial_cash
+        shares_held[0] = init_delta
+        deltas[0] = init_delta
+        option_prices[0] = init_price
+        portfolio_values[0] = initial_cash + (init_delta * s0) - init_price 
+        
+        # --- VARIABLES DE SUIVI ---
+        product_alive = True
+        final_idx = 0
+        status = "Running"
+        coupons_paid_count = 0
+        final_date = dates[-1]
+        
+        # Cumul des flux pour l'analyse finale
+        # On ne compte pas le hedge initial ici, on le rajoutera au "Trading P&L" global
+        total_payouts_paid = 0.0 
+        total_trans_costs = initial_fees
+
+        for i in range(1, n_days):
+            if not product_alive:
+                # Freeze
+                cash_account[i] = cash_account[i-1]
+                portfolio_values[i] = portfolio_values[i-1]
+                shares_held[i] = 0
+                deltas[i] = 0
+                option_prices[i] = 0
+                continue 
             
-            self.history.append({
-                "Date": date, "Spot": current_spot, "Model_Price": price,
-                "Delta": delta, "Shares": self.shares_held, "Cash": self.cash, "PnL": pnl
-            })
+            final_idx = i
+            s_curr = spots[i]
+            time_passed_years = i / 252.0
+            t_remain = contract_maturity - time_passed_years
+            
+            # --- CHECK MATURITÉ ---
+            if t_remain <= 0:
+                product_alive = False
+                status = "Matured"
+                final_date = dates[i]
+                
+                # A. PAYOFF FINAL
+                final_payoff = 0.0
+                if is_phoenix:
+                    if s_curr >= cpn_barrier: final_payoff += coupon_amount
+                    prot_lvl = getattr(self.option, 'protection_barrier', 0)
+                    if s_curr >= prot_lvl: final_payoff += nominal
+                    else: final_payoff += nominal * (s_curr / s0)
+                else:
+                    k = getattr(self.option, 'K', 0)
+                    otype = getattr(self.option, 'option_type', 'Call')
+                    final_payoff = max(s_curr - k, 0) if otype == 'Call' else max(k - s_curr, 0)
+
+                total_payouts_paid += final_payoff
+
+                # B. LIQUIDATION HEDGE
+                cash_from_hedge = shares_held[i-1] * s_curr
+                fees = abs(cash_from_hedge) * self.tc
+                total_trans_costs += fees
+                
+                # C. CASH FINAL
+                final_cash = cash_account[i-1] + cash_from_hedge - fees - final_payoff
+                
+                cash_account[i] = final_cash
+                portfolio_values[i] = final_cash
+                shares_held[i] = 0
+                deltas[i] = 0
+                option_prices[i] = final_payoff
+                continue
+
+            # --- VIE DU PRODUIT ---
+            is_observation = (i % days_between_obs == 0)
+            payout_flow = 0.0
+            just_autocalled = False
+            
+            if is_phoenix and is_observation:
+                if s_curr >= ac_barrier:
+                    payout_flow = nominal + coupon_amount
+                    just_autocalled = True
+                    product_alive = False
+                    status = "Autocalled"
+                    final_date = dates[i]
+                    coupons_paid_count += 1
+                elif s_curr >= cpn_barrier:
+                    payout_flow = coupon_amount
+                    coupons_paid_count += 1
+            
+            total_payouts_paid += payout_flow
+
+            # Pricing
+            self.option.S = s_curr
+            self.option.T = max(t_remain, 0.0001)
+            
+            if just_autocalled:
+                curr_price = 0.0
+                curr_delta = 0.0
+            else:
+                if hasattr(self.option, 'calculate_delta_quick'):
+                     curr_delta = self.option.calculate_delta_quick(n_sims=2000)
+                     curr_price = self.option.price()
+                else:
+                     curr_price = self.option.price()
+                     curr_delta = self.option.delta()
+            
+            # Cash Flow
+            prev_cash = cash_account[i-1]
+            interest = prev_cash * (np.exp(self.r * self.dt) - 1)
+            
+            cash_after_payout = prev_cash + interest - payout_flow
+            
+            # Rebalancement
+            prev_shares = shares_held[i-1]
+            shares_target = curr_delta
+            shares_trade = shares_target - prev_shares
+            
+            trade_cash_impact = shares_trade * s_curr
+            trade_fees = abs(trade_cash_impact) * self.tc
+            total_trans_costs += trade_fees
+            
+            new_cash = cash_after_payout - trade_cash_impact - trade_fees
+            
+            cash_account[i] = new_cash
+            shares_held[i] = shares_target
+            deltas[i] = shares_target
+            option_prices[i] = curr_price
+            portfolio_values[i] = new_cash + (shares_target * s_curr) - curr_price
+
+        # --- RESULTS ---
+        self.results = pd.DataFrame({
+            'Spot': spots,
+            'Option Price': option_prices,
+            'Delta': deltas,
+            'Shares Held': shares_held,
+            'Cash': cash_account,
+            'Cumulative P&L': portfolio_values
+        }, index=dates).iloc[:final_idx+1]
+        
+        # --- ANALYSE DECOMPOSITION ---
+        total_pnl = self.results['Cumulative P&L'].iloc[-1]
+        
+        # Trading P&L (Le résultat pur de l'activité d'achat/vente d'actions)
+        # On peut le déduire par P&L = Premium - Payouts - Costs + Trading_P&L
+        # Donc Trading_P&L = Total_P&L - Premium + Payouts + Costs
+        
+        trading_pnl_gross = total_pnl - initial_premium + total_payouts_paid + total_trans_costs
+        
+        if len(self.results) > 1:
+            log_returns = np.log(self.results['Spot'] / self.results['Spot'].shift(1)).dropna()
+            realized_vol = log_returns.std() * np.sqrt(252)
+        else:
+            realized_vol = 0.0
+            
+        pnl_diff = np.diff(self.results['Cumulative P&L'])
+        std_hedge_error = np.std(pnl_diff) if len(pnl_diff) > 0 else 0.0
+        
+        duration_months = (final_idx / 21.0)
+
+        metrics = {
+            'Total P&L': total_pnl,
+            'Hedge Error Std': std_hedge_error,
+            'Total Transaction Costs': total_trans_costs,
+            'Realized Volatility': realized_vol,
+            'Pricing Volatility': self.sigma,
+            'Option Premium': initial_premium,
+            'Total Payouts': total_payouts_paid,   # Somme de tout ce qu'on a payé au client
+            'Trading P&L (Gross)': trading_pnl_gross, # Ce qu'on a gagné en spéculant sur le Gamma (avant frais)
+            'Status': status,
+            'Duration (Months)': duration_months,
+            'Coupons Paid': coupons_paid_count,
+            'Final Date': final_date.strftime("%Y-%m-%d")
+        }
+        
+        return self.results, metrics
 
     def _calculate_greeks_at_date(self, ctx):
         p = ctx['params']
@@ -203,65 +322,111 @@ class DeltaHedgingEngine:
     # ==========================================================================
     # MODIFICATIONS : VERSIONS PLOTLY (INTERACTIVES)
     # ==========================================================================
-
+    
     def plot_pnl(self):
         """
-        Visualizes the Trader's Performance (Plotly Version).
-        Graph 1: Spot (Left) vs Hedge (Right)
-        Graph 2: Cumulative P&L
+        Visualise le Backtest avec des légendes claires et des couleurs explicites.
         """
-        df = pd.DataFrame(self.history)
-        if df.empty: return None
+        if self.results is None or self.results.empty: 
+            return None
         
-        # Création de subplots : 2 Lignes, 1 Colonne
-        # La ligne 1 a deux axes Y (secondary_y=True)
+        df = self.results.reset_index()
+        date_col = df.columns[0] 
+        
+        # Calcul du volume de trade quotidien
+        df['Trade'] = df['Shares Held'].diff().fillna(0)
+        
+        # SEPARATION ACHAT / VENTE (Pour avoir 2 légendes distinctes !)
+        # On met np.nan au lieu de 0 pour ne pas afficher de barres vides
+        df['Buy_Qty'] = df['Trade'].apply(lambda x: x if x > 0 else np.nan)
+        df['Sell_Qty'] = df['Trade'].apply(lambda x: x if x < 0 else np.nan)
+        
+        # Création de 3 lignes avec axes secondaires activés
         fig = make_subplots(
-            rows=2, cols=1, 
+            rows=3, cols=1, 
             shared_xaxes=True, 
-            vertical_spacing=0.1,
-            specs=[[{"secondary_y": True}], [{"secondary_y": False}]],
-            subplot_titles=("Market Movement & Hedge Adjustments", "Trader's Cumulative P&L")
+            vertical_spacing=0.08,
+            row_heights=[0.35, 0.30, 0.35],
+            specs=[[{"secondary_y": True}], [{"secondary_y": True}], [{"secondary_y": False}]],
+            subplot_titles=(
+                "Position vs Spot", 
+                "Rebalancing Activity", 
+                "Cumulative P&L"
+            )
         )
 
-        # --- GRAPH 1 : SPOT vs HEDGE ---
-        # Spot (Axe Gauche - Bleu)
+        # --- GRAPH 1 : SPOT & POSITION ---
+        # A. Le Spot (Prix de l'action) - Axe Gauche (Bleu)
         fig.add_trace(go.Scatter(
-            x=df['Date'], y=df['Spot'], 
-            name="Spot Price", mode='lines', 
-            line=dict(color='#1f77b4', width=2) # Bleu standard Matplotlib
+            x=df[date_col], y=df['Spot'], 
+            name="Spot Price (Left Axis)", 
+            line=dict(color='#1f77b4', width=2)
         ), row=1, col=1, secondary_y=False)
-
-        # Hedge/Delta (Axe Droit - Violet pointillé)
+        
+        # B. La Position (Nombre d'actions détenues) - Axe Droit (Orange)
         fig.add_trace(go.Scatter(
-            x=df['Date'], y=df['Delta'], 
-            name="Hedge (Delta)", mode='lines', 
-            line=dict(color='#9467bd', width=2, dash='dash') # Violet Matplotlib
+            x=df[date_col], y=df['Shares Held'], 
+            name="Shares Held / Delta (Right Axis)", 
+            line=dict(color='orange', dash='dot', width=2)
         ), row=1, col=1, secondary_y=True)
 
-        # --- GRAPH 2 : P&L ---
-        # P&L (Vert)
+        # --- GRAPH 2 : TRADING ACTIVITY (GAMMA) ---
+        # C. Achats (Barres Vertes)
+        fig.add_trace(go.Bar(
+            x=df[date_col], y=df['Buy_Qty'], 
+            name="Buy Stock (Rebalancing)", 
+            marker_color='#2ca02c', # Vert
+            opacity=0.7
+        ), row=2, col=1, secondary_y=False)
+        
+        # D. Ventes (Barres Rouges)
+        fig.add_trace(go.Bar(
+            x=df[date_col], y=df['Sell_Qty'], 
+            name="Sell Stock (Rebalancing)", 
+            marker_color='#d62728', # Rouge
+            opacity=0.7
+        ), row=2, col=1, secondary_y=False)
+        
+        # E. Spot "Fantôme" (Ligne grise fine) pour le contexte
         fig.add_trace(go.Scatter(
-            x=df['Date'], y=df['PnL'], 
-            name="Cumulative P&L", mode='lines',
-            line=dict(color='#2ca02c', width=2) # Vert standard Matplotlib
-        ), row=2, col=1)
+            x=df[date_col], y=df['Spot'], 
+            name="Spot Trend (Ref)", 
+            line=dict(color='white', width=1, dash='solid'), 
+            opacity=0.3,
+            showlegend=True # On le garde dans la légende pour info
+        ), row=2, col=1, secondary_y=True)
 
-        # Ligne Zéro sur le P&L
-        fig.add_hline(y=0, line_dash="dot", line_color="white", row=2, col=1)
+        # --- GRAPH 3 : P&L ---
+        fig.add_trace(go.Scatter(
+            x=df[date_col], y=df['Cumulative P&L'], 
+            name="Total P&L", 
+            line=dict(color='#00CC96', width=2), 
+            fill='tozeroy'
+        ), row=3, col=1)
 
-        # Mise en page
+        # --- LAYOUT & AXES ---
+        # showlegend=True est CRUCIAL ici !
         fig.update_layout(
-            template="plotly_dark",
-            height=700,
-            hovermode="x unified",
-            showlegend=True
+            height=900, 
+            template="plotly_dark", 
+            hovermode="x unified", 
+            showlegend=True,
+            legend=dict(
+                orientation="h", # Légende horizontale
+                yanchor="bottom", y=1.02, # Juste au-dessus du graphe 1
+                xanchor="right", x=1
+            )
         )
         
         # Labels Axes
-        fig.update_yaxes(title_text="Spot Price", color='#1f77b4', row=1, col=1, secondary_y=False)
-        fig.update_yaxes(title_text="Hedge (Delta)", color='#9467bd', row=1, col=1, secondary_y=True)
-        fig.update_yaxes(title_text="Cumulative P&L (€)", row=2, col=1)
-
+        fig.update_yaxes(title_text="Spot (€)", color='#1f77b4', row=1, col=1, secondary_y=False)
+        fig.update_yaxes(title_text="Qty Shares", color='orange', row=1, col=1, secondary_y=True, showgrid=False)
+        
+        fig.update_yaxes(title_text="Trade Qty", row=2, col=1, secondary_y=False)
+        fig.update_yaxes(title_text="Spot Lvl", color='gray', row=2, col=1, secondary_y=True, showgrid=False)
+        
+        fig.update_yaxes(title_text="P&L (€)", row=3, col=1)
+        
         return fig
 
     def plot_attribution(self):

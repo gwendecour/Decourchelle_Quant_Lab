@@ -37,7 +37,7 @@ def render_header():
     
     with col1:
         # Lien retour maison (simulé par un bouton lien ou text)
-        st.page_link("Home.py", label="🧪 Gwendal's Lab", icon="🏠")
+        st.page_link("Home.py", label="Home Page")
         
     with col2:
         # Lien vers le CV
