@@ -194,11 +194,23 @@ def reset_phoenix_props():
 # --- Callbacks ---
 def switch_to_custom_market():
     """
-    Appelé quand on modifie manuellement Spot/Vol/Rate.
-    Bascule le Ticker sur 'CUSTOM' pour montrer que ce n'est plus le live.
-    IMPORTANT : Il faut avoir ajouté "CUSTOM": "User Defined" dans ton dictionnaire TICKERS au début.
+    Appelé quand on modifie manuellement Spot/Vol/Rate dans l'onglet Pricing.
+    1. Bascule le Ticker sur 'CUSTOM'.
+    2. Pousse IMMÉDIATEMENT les nouvelles valeurs vers la simulation (Greeks).
     """
-    st.session_state.ticker_input = "CUSTOM"
+    # 1. Passage visuel en Custom
+    st.session_state.ticker_input = "CUSTOM" 
+    
+    # 2. Synchronisation du Spot (Tab 1 -> Tab 2)
+    new_spot = float(st.session_state.custom_spot)
+    st.session_state.sim_spot_val = new_spot
+    st.session_state.gk_slider_spot = new_spot
+    st.session_state.gk_box_spot = new_spot
+    
+    # 3. Synchronisation de la Volatilité (Tab 1 -> Tab 2)
+    # Attention aux échelles : Tab 1 est en décimal (0.20), Tab 2 slider est en % (20.0)
+    new_vol = float(st.session_state.custom_vol)
+    st.session_state.gk_vol_slider = new_vol * 100.0
 
 def update_market_data():
     ticker = st.session_state.ticker_input
@@ -303,7 +315,15 @@ def set_greeks_scenario(scenario_type):
     elif scenario_type == "Reset":
         st.session_state.gk_slider_spot = ref_spot
         st.session_state.gk_box_spot = ref_spot
-        st.session_state.gk_vol_slider = ref_vol * 100.0
+        
+        real_mkt_vol = st.session_state.get('market_vol')
+        if real_mkt_vol is not None:
+            st.session_state.gk_vol_slider = float(real_mkt_vol * 100)
+        else:
+            st.session_state.gk_vol_slider = 20.0
+            
+        # --- LIGNE A AJOUTER ICI ---
+        st.session_state.force_pnl_zero = True
 
 # ==============================================================================
 # 2. HEADER
@@ -312,11 +332,9 @@ TICKERS = {
     "GLE.PA": "SocGen (Bank)",
     "BNP.PA": "BNP Paribas (Bank)",
     "MC.PA": "LVMH (Luxury)",
-    "RMS.PA": "Hermes (Luxury)",
     "TTE.PA": "TotalEnergies (Energy)",
     "SAN.PA": "Sanofi (Health)",
     "AIR.PA": "Airbus (Indus)",
-    "STLAP.PA": "Stellantis (Auto)",
     "CAP.PA": "Capgemini (Tech)",
     "CUSTOM": "User Defined Data"
 }
@@ -422,7 +440,7 @@ with tab_pricing:
             r1, r2 = st.columns(2)
             with r1:
                 # Reset 1 : Marché uniquement
-                st.button("🔄 Reset Market Values", on_click=set_pricing_scenario, args=("Reset",), use_container_width=True, help="Remet Spot/Vol/Rate aux données fetchées")
+                st.button("Reset Market Values", on_click=set_pricing_scenario, args=("Reset",), use_container_width=True, help="Remet Spot/Vol/Rate aux données fetchées")
             with r2:
                 # Reset 2 : Propriétés Phoenix uniquement
                 st.button("Reset Properties", on_click=reset_phoenix_props, use_container_width=True, help="Remet Barrières et Coupon par défaut")
@@ -439,7 +457,7 @@ with tab_pricing:
             st.caption("1. Structure / Moneyness")
             b1, b2, b3, b4 = st.columns(4, gap="small")
             with b1: 
-                st.button("🔄 Reset", on_click=set_pricing_scenario, args=("Reset",), use_container_width=True)
+                st.button("Reset", on_click=set_pricing_scenario, args=("Reset",), use_container_width=True)
             with b2: 
                 st.button("ATM", on_click=set_pricing_scenario, args=("ATM",), use_container_width=True, help="Strike = Spot")
             with b3: 
@@ -484,6 +502,30 @@ with tab_pricing:
 
         # Graphique Payoff
         st.plotly_chart(fig_main, use_container_width=True)
+
+        if p_type == "Phoenix":
+            # Récupération des seuils pour l'affichage
+            p_lvl = S * st.session_state.barrier_pct
+            c_lvl = S * st.session_state.coupon_barrier_pct
+            a_lvl = S * st.session_state.autocall_pct
+            
+            st.markdown(f"""
+            **Phoenix Payoff Zones (at Maturity):**
+            
+            **Downside Risk (< {p_lvl:.2f} €):** Below the **Protection Barrier**, the capital protection disappears. You are fully exposed to the stock's fall (1:1 loss like holding the stock).
+            
+            **Coupon Zone ({c_lvl:.2f} € - {a_lvl:.2f} €):** Between the Coupon Barrier and Autocall level. You recover your **100% Capital** + Potential Coupons (Memory effect usually applies).
+            
+            **Autocall / Cap (> {a_lvl:.2f} €):** Above the Autocall level. You get **100% Capital + Coupon**. The performance is capped (you don't benefit from the stock's rise beyond the coupon).
+            """)
+            
+        elif p_type == "Call":
+             k_val = S * (st.session_state.strike_pct / 100.0)
+             st.markdown(f"**Call Payoff:** Client profit if Spot > Strike (**{k_val:.2f} €**). It's the opposite for the bank Short Call")
+             
+        elif p_type == "Put":
+             k_val = S * (st.session_state.strike_pct / 100.0)
+             st.markdown(f"**Put Payoff:** Client profit if Spot < Strike (**{k_val:.2f} €**). It's the opposite for the bank Short Put")
         
     # --- LIGNE 2 : ANALYSE SENSIBILITÉ ---
     st.divider()
@@ -500,6 +542,14 @@ with tab_pricing:
             fig_struct = product.plot_price_vs_strike(current_spot=S)
             # use_container_width=True permet d'occuper toute la colonne
             st.plotly_chart(fig_struct, use_container_width=True, config={'displayModeBar': False})
+
+            if p_type == "Call":
+                note = "**Trend:** Decreasing. Higher strike decreases probability of exercise."
+            elif p_type == "Put":
+                note = "**Trend:** Increasing. Higher strike increases probability of exercise."
+            elif p_type == "Phoenix":
+                note = "**Trend:** Sharp rise below Protection Barrier, steady in Coupon Zone, flat above Autocall."
+            st.caption(note)
             
     with graph_col2:
         # Titre propre en anglais
@@ -507,6 +557,11 @@ with tab_pricing:
         with st.spinner("Computing..."):
             fig_vol = product.plot_price_vs_vol(current_vol=sigma)
             st.plotly_chart(fig_vol, use_container_width=True, config={'displayModeBar': False})
+            if p_type in ["Call", "Put"]:
+                note_vol = "**Trend:** Positive Vega. Long options benefit from higher uncertainty/volatility."
+            elif p_type == "Phoenix":
+                note_vol = "**Trend:** Negative Vega. Higher volatility increases the risk of hitting the downside barrier, lowering the price."
+            st.caption(note_vol)
 
 
 
@@ -545,8 +600,8 @@ with tab_greeks:
                 def_k = float(st.session_state.get('fix_strike_input', S))
                 
                 fixed_strike = st.number_input("Strike (€)", value=def_k, step=1.0, format="%.2f", 
-                                             key="fix_strike_input", 
-                                             on_change=sync_sim_to_strike)
+                                               key="fix_strike_input", 
+                                               on_change=sync_sim_to_strike)
                 ref_value = fixed_strike
 
         st.divider()
@@ -554,9 +609,13 @@ with tab_greeks:
         # --- 2. MARKET SIMULATION (VARIABLE) ---
         st.markdown("**Market Simulation**")
         
-        # A. Initialisation Robuste
+        # A. Initialisation Robuste (AJOUT DE LA VOLATILITE ICI)
         if 'sim_spot_val' not in st.session_state: 
             st.session_state.sim_spot_val = float(S)
+        
+        # Initialisation Volatilité (Nécessaire car on retire 'value=' plus bas)
+        if 'gk_vol_slider' not in st.session_state:
+            st.session_state.gk_vol_slider = float(sigma * 100)
 
         # On s'assure aussi que les clés spécifiques aux widgets existent
         if 'gk_slider_spot' not in st.session_state:
@@ -581,13 +640,11 @@ with tab_greeks:
         # D. Affichage Slider / Box
         c_sim1, c_sim2 = st.columns([3, 1])
         with c_sim1:
-            # On lit la valeur via st.session_state.sim_spot_val
+            # CORRECTION : Suppression de 'value='. La 'key' suffit.
             st.slider("Spot Range", 0.0, max_spot, key="gk_slider_spot", 
-                      value=float(st.session_state.sim_spot_val), 
                       on_change=update_slider, label_visibility="collapsed")
         with c_sim2:
             st.number_input("Spot", 0.0, max_spot, key="gk_box_spot", 
-                            value=st.session_state.gk_slider_spot, 
                             on_change=update_box, label_visibility="collapsed")
         
         # E. Variable DYNAMIQUE pour le calcul
@@ -597,10 +654,13 @@ with tab_greeks:
         pct_move = (dyn_spot / ref_value - 1) * 100 if ref_value > 0 else 0
         st.caption(f"Simulated Spot: **{dyn_spot:.2f} €** ({pct_move:+.2f}%)")
 
-        # F. Volatilité (C'est ici la seule définition autorisée !)
+        # F. Volatilité
         st.write("")
-        sim_vol_pct = st.slider("Volatility (%)", 1.0, 100.0, float(sigma*100), 0.5, key="gk_vol_slider")
-        dyn_vol = sim_vol_pct / 100.0
+        # CORRECTION : Suppression de 'value='. La 'key' gère tout.
+        st.slider("Volatility (%)", 1.0, 100.0, key="gk_vol_slider")
+        
+        # CORRECTION : On lit DIRECTEMENT le State pour être sûr d'avoir la valeur post-Reset
+        dyn_vol = st.session_state.gk_vol_slider / 100.0
 
         st.divider()
         
@@ -608,11 +668,10 @@ with tab_greeks:
         st.caption("Quick Scenarios")
         b1, b2, b3, b4 = st.columns(4)
         
-        with b1: st.button("Crash", on_click=set_greeks_scenario, args=("Crash",), use_container_width=True)
-        with b2: st.button("Rally", on_click=set_greeks_scenario, args=("Rally",), use_container_width=True)
-        with b3: st.button("Bleed", on_click=set_greeks_scenario, args=("TimeBleed",), use_container_width=True, help="-1 Month")
-        with b4: st.button("Reset", on_click=set_greeks_scenario, args=("Reset",), use_container_width=True)
-
+        with b1: st.button("Crash", on_click=set_greeks_scenario, args=("Crash",), use_container_width=True, help="**Market Crash:**\n- Spot: -15%\n- Volatility: +20 pts (Fear spike)\n\nSimulates a sudden market drop panic.")
+        with b2: st.button("Rally", on_click=set_greeks_scenario, args=("Rally",), use_container_width=True, help="**Bull Rally:**\n- Spot: +10%\n- Volatility: -5 pts (Calm)\n\nSimulates a steady market rise.")
+        with b3: st.button("Bleed", on_click=set_greeks_scenario, args=("TimeBleed",), use_container_width=True, help="**Time Decay:**\n- Maturity: -1 Month\n- Spot/Vol: Unchanged\n\nIsolates the effect of Theta (Time passing).")
+        with b4: st.button("Reset", on_click=set_greeks_scenario, args=("Reset",), use_container_width=True, help="**Reset:**\nReverts all parameters (Spot, Vol, Time) to the initial Market Data values.")
     # ==========================================================================
     # COLONNE DROITE : METRICS & P&L
     # ==========================================================================
@@ -642,7 +701,7 @@ with tab_greeks:
             greeks = {'delta': -client_delta, 'gamma': 0.0, 'vega': 0.0, 'theta': 0.0}
 
             # Full Greeks on demand
-            if st.button("⚡ Compute Full Greeks"):
+            if st.button("Compute Full Greeks"):
                 c_greeks = prod_gk.greeks()
                 greeks = {k: -v for k, v in c_greeks.items()}
 
@@ -660,7 +719,6 @@ with tab_greeks:
         m2.metric("Theta (Θ)", f"{greeks.get('theta',0):.4f}")
 
         # 3. P&L DECOMPOSITION
-        st.divider()
         st.markdown("#### P&L Attribution")
         
         # Différentiels
@@ -686,6 +744,16 @@ with tab_greeks:
 
         real_pnl = - (prod_gk.price() - prod_ref.price())
 
+        # Si le bouton Reset vient d'être cliqué, on force le nettoyage visuel
+        if st.session_state.get('force_pnl_zero', False):
+            real_pnl = 0.0
+            taylor_pnl = 0.0
+            pnl_delta = 0.0
+            pnl_gamma = 0.0
+            pnl_vega = 0.0
+            # On éteint le drapeau pour que les prochains mouvements recalculent normalement
+            st.session_state.force_pnl_zero = False
+
         # Affichage P&L
         c_pnl1, c_pnl2 = st.columns(2)
         color = "normal" if real_pnl >= 0 else "inverse"
@@ -696,6 +764,72 @@ with tab_greeks:
         cols[0].metric("Delta P&L", f"{pnl_delta:+.2f}")
         cols[1].metric("Gamma P&L", f"{pnl_gamma:+.2f}")
         cols[2].metric("Vega P&L", f"{pnl_vega:+.2f}")
+
+        # ... (Calcul des Greeks et du P&L Attribution fait juste avant) ...
+    
+        # --- LOGIQUE D'EXPLICATION DYNAMIQUE ---
+        st.subheader("P&L Attribution Analysis")
+    
+        # 1. On détecte le mouvement simulé
+        spot_move = st.session_state.sim_spot_val - S # S = Spot initial
+        vol_move = (st.session_state.gk_vol_slider/100.0) - sigma # sigma = Vol initiale
+    
+        explanation = []
+    
+        # 2. Analyse par Produit (Vue BANQUE / VENDEUR)
+        if p_type == "Call":
+            role = "Short Call"
+            explanation.append(f"**Position:** You are **{role}** (Bank View). You are Short Delta, Short Gamma, Short Vega, Long Theta.")
+        
+            # Delta/Gamma Analysis
+            if spot_move > 0:
+                explanation.append(f"**Spot (+):** Market went UP. Being Short Delta, you **lost money** on Delta.")
+                explanation.append(f"**Gamma Impact:** As Spot rose, your negative Delta became even more negative (Short Gamma). **Losses accelerated**.")
+            elif spot_move < 0:
+                explanation.append(f"**Spot (-):** Market went DOWN. Being Short Delta, you **made money** on Delta.")
+                explanation.append(f"**Gamma Impact:** Short Gamma worked in your favor here (cushioning losses or accelerating gains).")
+            
+            # Vega Analysis
+            if vol_move > 0:
+                explanation.append(f"**Vol (+):** Implied Vol rose. Being Short Vega, the option price increased, so you **lost money** (Mark-to-Market).")
+            elif vol_move < 0:
+                explanation.append(f"**Vol (-):** Vol dropped. Being Short Vega, you **gained money**.")
+
+        elif p_type == "Put":
+            role = "Short Put"
+            explanation.append(f"**Position:** You are **{role}**. You are Long Delta (Bullish), Short Gamma, Short Vega, Long Theta.")
+        
+            # Delta Analysis
+            if spot_move > 0:
+                explanation.append(f"**Spot (+):** Market went UP. Being Long Delta, you **made money** (Put value dropped).")
+            elif spot_move < 0:
+                explanation.append(f"**Spot (-):** Market went DOWN. Being Long Delta, you **lost money**.")
+            
+            # Vega Analysis (Idem Call)
+            if vol_move > 0:
+                explanation.append(f"**Vol (+):** Vol rose. Short Vega -> **Loss**.")
+            elif vol_move < 0:
+                explanation.append(f"**Vol (-):** Vol dropped. Short Vega -> **Gain**.")
+
+        elif p_type == "Phoenix":
+            role = "Short Phoenix (Issuer)"
+            explanation.append(f"**Position:** You are **{role}**. Generally Long Vega (unlike vanilla), Long Theta, and Mixed Delta/Gamma.")
+        
+            # Vega Specificity for Phoenix
+            if vol_move > 0:
+                explanation.append(f"**Vol (+):** Uniquely here, Vol rising often helps the Issuer (Long Vega). Higher Vol increases the probability of hitting the downside barrier (Knock-In), lowering the product's value (your liability). -> **Gain**.")
+            elif vol_move < 0:
+                explanation.append(f"**Vol (-):** Vol dropping makes the product safer for the client. Its value rises. -> **Loss**.")
+            
+            # Delta/Spot
+            if spot_move < 0:
+                explanation.append(f"**Spot (-):** Market drop. The product gets closer to the risk barrier. Its value drops heavily. You **gain**.")
+            elif spot_move > 0:
+                explanation.append(f"**Spot (+):** Market rise. The product gets closer to Autocall (paying 100% + Cpn). Its value rises towards Par. You **lose** (or gain less).")
+
+        
+        # Affichage propre
+        st.markdown("\n\n".join(explanation))    
 
     # ==========================================================================
     # PARTIE 3 : HEATMAPS (RECUPEREE DU CODE PRECEDENT)
