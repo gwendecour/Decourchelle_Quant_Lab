@@ -83,12 +83,12 @@ class DeltaHedgingEngine:
              init_price = self.option.price()
              init_delta = self.option.delta()
         
-        # LOGIQUE DECOMPOSÉE
+        # COMPTABILITÉ T=0
         initial_premium = init_price
         initial_hedge_cost = (init_delta * s0)
         initial_fees = abs(initial_hedge_cost) * self.tc
         
-        # Cash = Prime - Coût Hedge - Frais
+        # Cash = Prime reçue - Achat des actions - Frais
         initial_cash = initial_premium - initial_hedge_cost - initial_fees
         
         cash_account[0] = initial_cash
@@ -104,14 +104,13 @@ class DeltaHedgingEngine:
         coupons_paid_count = 0
         final_date = dates[-1]
         
-        # Cumul des flux pour l'analyse finale
-        # On ne compte pas le hedge initial ici, on le rajoutera au "Trading P&L" global
+        # Cumul des flux (Pour metrics)
         total_payouts_paid = 0.0 
         total_trans_costs = initial_fees
 
         for i in range(1, n_days):
             if not product_alive:
-                # Freeze
+                # Freeze des valeurs si fini
                 cash_account[i] = cash_account[i-1]
                 portfolio_values[i] = portfolio_values[i-1]
                 shares_held[i] = 0
@@ -130,40 +129,45 @@ class DeltaHedgingEngine:
                 status = "Matured"
                 final_date = dates[i]
                 
-                # A. PAYOFF FINAL
-                final_payoff = 0.0
+                # A. PAYOFF FINAL (La logique demandée)
+                engine_payoff = 0.0
+                
                 if is_phoenix:
-                    if s_curr >= cpn_barrier: final_payoff += coupon_amount
+                    # Pour Phoenix, on garde la logique IN-ENGINE car c'est complexe (Barrières)
+                    if s_curr >= cpn_barrier: engine_payoff += coupon_amount
                     prot_lvl = getattr(self.option, 'protection_barrier', 0)
-                    if s_curr >= prot_lvl: final_payoff += nominal
-                    else: final_payoff += nominal * (s_curr / s0)
+                    if s_curr >= prot_lvl: engine_payoff += nominal
+                    else: engine_payoff += nominal * (s_curr / s0)
                 else:
-                    k = getattr(self.option, 'K', 0)
-                    otype = getattr(self.option, 'option_type', 'Call')
-                    final_payoff = max(s_curr - k, 0) if otype == 'Call' else max(k - s_curr, 0)
+                    # Pour Vanilla : ON NE PAIE RIEN ICI.
+                    # On sort juste de la position hedge. Le payout sera calculé dans l'interface.
+                    engine_payoff = 0.0 
 
-                total_payouts_paid += final_payoff
+                total_payouts_paid += engine_payoff
 
-                # B. LIQUIDATION HEDGE
+                # B. LIQUIDATION HEDGE (Sortie de position)
+                # On vend TOUT ce qu'on a.
                 cash_from_hedge = shares_held[i-1] * s_curr
                 fees = abs(cash_from_hedge) * self.tc
                 total_trans_costs += fees
                 
                 # C. CASH FINAL
-                final_cash = cash_account[i-1] + cash_from_hedge - fees - final_payoff
+                # Cash = Cash Veille + Vente Actions - Frais - Payoff (0 pour Vanilla, X pour Phoenix)
+                final_cash = cash_account[i-1] + cash_from_hedge - fees - engine_payoff
                 
                 cash_account[i] = final_cash
-                portfolio_values[i] = final_cash
+                portfolio_values[i] = final_cash # Le portefeuille n'est plus que du cash
                 shares_held[i] = 0
                 deltas[i] = 0
-                option_prices[i] = final_payoff
+                option_prices[i] = engine_payoff
                 continue
 
-            # --- VIE DU PRODUIT ---
+            # --- VIE DU PRODUIT (COUPONS INTERMÉDIAIRES) ---
             is_observation = (i % days_between_obs == 0)
             payout_flow = 0.0
             just_autocalled = False
             
+            # Seul le Phoenix a des flux intermédiaires
             if is_phoenix and is_observation:
                 if s_curr >= ac_barrier:
                     payout_flow = nominal + coupon_amount
@@ -178,7 +182,7 @@ class DeltaHedgingEngine:
             
             total_payouts_paid += payout_flow
 
-            # Pricing
+            # Pricing & Delta
             self.option.S = s_curr
             self.option.T = max(t_remain, 0.0001)
             
@@ -193,13 +197,12 @@ class DeltaHedgingEngine:
                      curr_price = self.option.price()
                      curr_delta = self.option.delta()
             
-            # Cash Flow
+            # Cash Flow Interest
             prev_cash = cash_account[i-1]
             interest = prev_cash * (np.exp(self.r * self.dt) - 1)
-            
             cash_after_payout = prev_cash + interest - payout_flow
             
-            # Rebalancement
+            # Rebalancement (Trading)
             prev_shares = shares_held[i-1]
             shares_target = curr_delta
             shares_trade = shares_target - prev_shares
@@ -216,7 +219,25 @@ class DeltaHedgingEngine:
             option_prices[i] = curr_price
             portfolio_values[i] = new_cash + (shares_target * s_curr) - curr_price
 
-        # --- RESULTS ---
+        # --- METRICS DE SORTIE ---
+        # On renvoie les infos brutes pour que l'interface finisse le calcul Vanilla
+        
+        # P&L Brut du moteur :
+        # Pour Phoenix : C'est le vrai P&L Net (car Payouts inclus)
+        # Pour Vanilla : C'est (Prime + Trading P&L) - 0 (car Payout ignoré)
+        engine_pnl = portfolio_values[final_idx] 
+        
+        # Volatilité réalisée
+        if len(self.results) > 1 if self.results is not None else len(spots) > 1:
+            log_returns = np.log(spots[:final_idx+1] / np.roll(spots[:final_idx+1], 1))[1:]
+            realized_vol = np.std(log_returns) * np.sqrt(252)
+        else:
+            realized_vol = 0.0
+            
+        # Données de fin pour calcul externe
+        final_spot_val = spots[final_idx]
+        
+        # On reconstruit les résultats dataframe
         self.results = pd.DataFrame({
             'Spot': spots,
             'Option Price': option_prices,
@@ -225,43 +246,23 @@ class DeltaHedgingEngine:
             'Cash': cash_account,
             'Cumulative P&L': portfolio_values
         }, index=dates).iloc[:final_idx+1]
-        
-        # --- ANALYSE DECOMPOSITION ---
-        total_pnl = self.results['Cumulative P&L'].iloc[-1]
-        
-        # Trading P&L (Le résultat pur de l'activité d'achat/vente d'actions)
-        # On peut le déduire par P&L = Premium - Payouts - Costs + Trading_P&L
-        # Donc Trading_P&L = Total_P&L - Premium + Payouts + Costs
-        
-        trading_pnl_gross = total_pnl - initial_premium + total_payouts_paid + total_trans_costs
-        
-        if len(self.results) > 1:
-            log_returns = np.log(self.results['Spot'] / self.results['Spot'].shift(1)).dropna()
-            realized_vol = log_returns.std() * np.sqrt(252)
-        else:
-            realized_vol = 0.0
-            
-        pnl_diff = np.diff(self.results['Cumulative P&L'])
-        std_hedge_error = np.std(pnl_diff) if len(pnl_diff) > 0 else 0.0
-        
-        duration_months = (final_idx / 21.0)
 
         metrics = {
-            'Total P&L': total_pnl,
-            'Hedge Error Std': std_hedge_error,
+            'Engine P&L': engine_pnl, # Attention, sens différent selon Phoenix/Vanilla
             'Total Transaction Costs': total_trans_costs,
             'Realized Volatility': realized_vol,
             'Pricing Volatility': self.sigma,
             'Option Premium': initial_premium,
-            'Total Payouts': total_payouts_paid,   # Somme de tout ce qu'on a payé au client
-            'Trading P&L (Gross)': trading_pnl_gross, # Ce qu'on a gagné en spéculant sur le Gamma (avant frais)
+            'Phoenix Payouts Included': total_payouts_paid, 
             'Status': status,
-            'Duration (Months)': duration_months,
+            'Duration (Months)': (final_idx / 21.0),
             'Coupons Paid': coupons_paid_count,
-            'Final Date': final_date.strftime("%Y-%m-%d")
+            'Final Date': final_date.strftime("%Y-%m-%d"),
+            'Final Spot': final_spot_val
         }
         
         return self.results, metrics
+
 
     def _calculate_greeks_at_date(self, ctx):
         p = ctx['params']
@@ -336,10 +337,24 @@ class DeltaHedgingEngine:
         # Calcul du volume de trade quotidien
         df['Trade'] = df['Shares Held'].diff().fillna(0)
         
-        # SEPARATION ACHAT / VENTE (Pour avoir 2 légendes distinctes !)
-        # On met np.nan au lieu de 0 pour ne pas afficher de barres vides
-        df['Buy_Qty'] = df['Trade'].apply(lambda x: x if x > 0 else np.nan)
-        df['Sell_Qty'] = df['Trade'].apply(lambda x: x if x < 0 else np.nan)
+        display_trade = df['Trade'].copy()
+        
+        # 1. On masque le trade d'entrée (t=0)
+        # C'est l'achat initial du Delta. C'est énorme, ça écrase l'échelle. On le vire.
+        if len(display_trade) > 0:
+            display_trade.iloc[0] = 0.0
+            
+        # 2. On masque le trade de sortie (Liquidation)
+        # C'est la vente de tout le stock à la fin. Énorme aussi. On le vire.
+        # On cherche le dernier index où le trade n'est pas nul
+        # (Attention : si product_alive=False avant la fin, ce n'est pas forcément la dernière ligne)
+        last_trade_idx = display_trade.to_numpy().nonzero()[0]
+        if len(last_trade_idx) > 0:
+             display_trade.iloc[last_trade_idx[-2]] = 0.0
+
+        # On utilise display_trade au lieu de df['Trade'] pour les barres
+        df['Buy_Qty'] = display_trade.apply(lambda x: x if x > 0 else np.nan)
+        df['Sell_Qty'] = display_trade.apply(lambda x: x if x < 0 else np.nan)
         
         # Création de 3 lignes avec axes secondaires activés
         fig = make_subplots(

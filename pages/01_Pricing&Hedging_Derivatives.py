@@ -436,14 +436,9 @@ with tab_pricing:
             st.write("")
             st.markdown("### Resets")
             
-            # --- VOS DEUX BOUTONS SEPARES ICI ---
-            r1, r2 = st.columns(2)
-            with r1:
-                # Reset 1 : Marché uniquement
-                st.button("Reset Market Values", on_click=set_pricing_scenario, args=("Reset",), use_container_width=True, help="Remet Spot/Vol/Rate aux données fetchées")
-            with r2:
-                # Reset 2 : Propriétés Phoenix uniquement
-                st.button("Reset Properties", on_click=reset_phoenix_props, use_container_width=True, help="Remet Barrières et Coupon par défaut")
+
+            st.button("Reset Market Values", on_click=set_pricing_scenario, args=("Reset",), use_container_width=True, help="Remet Spot/Vol/Rate aux données fetchées")
+            st.button("Reset Properties", on_click=reset_phoenix_props, use_container_width=True, help="Remet Barrières et Coupon par défaut")
 
         elif p_type in ["Call", "Put"]:
             make_input_group("Moneyness (%)", "strike_pct", 50.0, 150.0, 1.0)
@@ -499,6 +494,49 @@ with tab_pricing:
         k1.metric("Price", f"{price:.2f} €")
         k2.metric("% Nominal", f"{(price/S)*100:.2f} %")
         k3.metric(metric_lbl, metric_val)
+
+        
+        with st.expander("Model & Algorithm Details (How is the price calculated?)"):
+            if p_type == "Phoenix":
+                st.markdown("""
+        **Pricing Engine: Monte Carlo Simulation**
+        
+        Since Phoenix Autocalls are **Path-Dependent** structures (the outcome depends on the daily/monthly history of the spot, not just the final value), closed-form formulas (like Black-Scholes) cannot be used directly.
+        
+        **Algorithm Steps:**
+        1.  **Diffusion:** We simulate **2,000 to 10,000 paths** of the underlying asset using Geometric Brownian Motion (GBM).
+            * $dS_t = r S_t dt + \sigma S_t dW_t$
+        2.  **Observation:** For each path, we check the barriers (Coupon, Protection, Autocall) at every observation date.
+        3.  **Payoff Calculation:** We determine the cash flows for each specific path (Coupons paid, early redemption, or final payout).
+        4.  **Discounting:** We discount the average payoff back to present value using the risk-free rate $r$.
+            * $Price = e^{-rT} \cdot \mathbb{E}^{\mathbb{Q}}[\text{Payoff}]$
+        """)
+            else:
+        # On définit le texte en fonction du type d'option (Call ou Put)
+                if "Call" in p_type:
+                    direction = "Call"
+                    formula_latex = r"C(S,t) = S e^{-qT} N(d_1) - K e^{-rT} N(d_2)"
+                    desc = "The price represents the spot price weighted by probability minus the discounted strike."
+                else:
+                    direction = "Put"
+                    formula_latex = r"P(S,t) = K e^{-rT} N(-d_2) - S e^{-qT} N(-d_1)"
+                    desc = "The price represents the discounted strike weighted by probability minus the spot price."
+
+                st.markdown(f"""
+                **Pricing Engine: Black-Scholes-Merton (Closed Form)**
+        
+                For Vanilla European **{direction}** Options, the payoff depends only on the spot price at maturity $T$. We use the analytical Black-Scholes formula.
+        
+                **Formula ({direction}):**
+                * ${formula_latex}$
+        
+                *{desc}*
+        
+                Where:
+                * $d_1 = \\frac{{\ln(S/K) + (r - q + \sigma^2/2)T}}{{\sigma \sqrt{{T}}}}$
+                * $d_2 = d_1 - \sigma \sqrt{{T}}$
+                """)
+        st.divider()
 
         # Graphique Payoff
         st.plotly_chart(fig_main, use_container_width=True)
@@ -718,6 +756,52 @@ with tab_greeks:
         m2.metric("Vega (ν)", f"{greeks.get('vega',0):.4f}")
         m2.metric("Theta (Θ)", f"{greeks.get('theta',0):.4f}")
 
+        
+        with st.expander("How are Greeks calculated? (Methodology)"):
+    
+            # CAS 1 : PRODUIT COMPLEXE (PHOENIX)
+            if p_type == "Phoenix":
+                st.markdown(r"""
+        **Method: Finite Differences ("Bump & Revalue")**
+        
+        Since the Phoenix Autocall has a **path-dependent** payoff (barriers, memory effect) and no closed-form solution, we cannot calculate derivatives analytically. Instead, we perform a numerical approximation by slightly shifting market parameters and re-running the Monte Carlo simulation.
+        
+        * **Delta ($\Delta$):** We use a **Central Difference** approach. We re-price the product with Spot $\pm 1\%$ ($\epsilon$).
+            $$ \Delta \approx \frac{P(S+\epsilon) - P(S-\epsilon)}{2\epsilon} $$
+            
+        * **Gamma ($\Gamma$):** Derived from the "curvature" of the price (second derivative).
+            $$ \Gamma \approx \frac{P(S+\epsilon) - 2P(S) + P(S-\epsilon)}{\epsilon^2} $$
+            
+        * **Vega ($\nu$):** We shift the entire volatility surface by $+1\%$ (Forward Difference).
+            $$ \nu \approx P(\sigma + 1\%) - P(\sigma) $$
+
+        **Why isn't it instant? (Computational Cost)**
+        Unlike Vanilla options where formulas are executed in milliseconds, each term $P(\cdot)$ in the equations above represents a **full Monte Carlo simulation** (e.g., 10,000 simulations). 
+        To calculate Delta, Gamma, and Vega, the engine must therefore run **4 to 5 separate Monte Carlo simulations** in sequence. This explains the slight delay compared to Vanilla options.
+        
+        """)
+
+    # CAS 2 : PRODUIT VANILLA (CALL / PUT)
+            else:
+                st.markdown(r"""
+        **Method: Analytical Formulas (Black-Scholes-Merton)**
+        
+        For European Vanilla options (Call & Put), the payoff depends solely on the final spot price. We do not need simulation; we use the exact **closed-form partial derivatives** from the Black-Scholes model.
+        
+        * **Delta ($\Delta$):** Represents the probability of the option expiring in-the-money (adjusted).
+            $$ \Delta_{call} = N(d_1) \quad ; \quad \Delta_{put} = N(d_1) - 1 $$
+            
+        * **Gamma ($\Gamma$):** Identical for Call and Put (measure of convexity).
+            $$ \Gamma = \frac{N'(d_1)}{S \sigma \sqrt{T}} $$
+            
+        * **Vega ($\nu$):** Sensitivity to volatility (identical for Call and Put).
+            $$ \nu = S \sqrt{T} N'(d_1) $$
+            
+        *(Where $N(x)$ is the standard normal cumulative distribution function and $d_1$ is the standard BS factor).*
+        """)
+
+        st.divider()
+
         # 3. P&L DECOMPOSITION
         st.markdown("#### P&L Attribution")
         
@@ -893,7 +977,7 @@ with tab_greeks:
             st.plotly_chart(fig_structure, use_container_width=True)
             
     elif p_type == "Phoenix":
-        st.info("Structural Analysis graphs are disabled for Phoenix (Computationally too heavy).")
+        st.markdown("Structural Analysis graphs are disabled for Phoenix (Computationally too heavy).")
 
 # ==============================================================================
 # TAB 3: BACKTEST
@@ -904,20 +988,17 @@ with tab_backtest:
     
     with st.container(border=True):
         # ----------------------------------------------------------------------
-        # A. PARAMÈTRES DU PRODUIT (Maturité, Strike/Barrières)
+        # A. PRODUCT CONFIGURATION
         # ----------------------------------------------------------------------
         st.markdown(f"#### {p_type} Configuration")
         
-        # Initialisation des variables
+        # Init variables
         bt_autocall, bt_coupon_bar, bt_protection, bt_coupon_rate = 0, 0, 0, 0
         bt_strike_pct = 1.0
-        
-        # Variable pour la maturité du produit (Indépendante de la durée du backtest)
         bt_maturity = 1.0 
 
         if p_type == "Phoenix":
-            # --- CONFIG PHOENIX (5 Colonnes maintenant) ---
-            # On ajoute la Maturité ici car c'est structurel
+            # --- PHOENIX SETUP ---
             phx_c1, phx_c2, phx_c3, phx_c4, phx_c5 = st.columns(5)
             
             with phx_c1:
@@ -933,22 +1014,18 @@ with tab_backtest:
                 val_cr = st.number_input("Annual Coupon (%)", value=8.0, step=0.5, key="bt_cr_input")
                 bt_coupon_rate = val_cr / 100.0
             with phx_c5:
-                # Maturité Phoenix Standard = 5 ans
                 bt_maturity = st.number_input("Maturity (Years)", value=5.0, step=1.0, min_value=0.5, key="bt_mat_phx")
                 
         else:
-            # --- CONFIG CALL / PUT ---
-            vanilla_c1, vanilla_c2, vanilla_c3 = st.columns([1, 1, 2])
+            # --- VANILLA SETUP ---
+            vanilla_c1, vanilla_c2 = st.columns([2, 2])
             with vanilla_c1:
                 bt_strike_pct = st.number_input("Strike % Init Spot", value=1.0, step=0.05, key="bt_strike_input")
             with vanilla_c2:
-                # Maturité Option Vanilla Standard = 1 an (ou 3 mois = 0.25)
                 bt_maturity = st.number_input("Maturity (Years)", value=1.0, step=0.25, min_value=0.1, key="bt_mat_vanilla")
-            with vanilla_c3:
-                st.markdown("Define the contract specifics (Strike & Maturity).")
 
         # ----------------------------------------------------------------------
-        # B. PARAMÈTRES DE SIMULATION (Marché & Période)
+        # B. MARKET & SIMULATION SETTINGS
         # ----------------------------------------------------------------------
         st.markdown("#### Market & Execution Settings")
         
@@ -976,13 +1053,13 @@ with tab_backtest:
             elif period_choice == "Last 2 Years": start_d_calc = today - datetime.timedelta(days=730)
             else: start_d_calc = datetime.date(today.year, 1, 1)
             
-            st.caption(f"{start_d_calc} ➝ {today}")
+            st.caption(f"{start_d_calc} -> {today}")
             date_range = (start_d_calc, today)
 
     # --------------------------------------------------------------------------
-    # C. BOUTON D'EXÉCUTION
+    # C. EXECUTION & ANALYSIS
     # --------------------------------------------------------------------------
-    if st.button("Run Backtest", type="primary", use_container_width=True):
+    if st.button("Run Backtest (instant for Vanilla option, up to 15sec for Phoenix option)", type="primary", use_container_width=True):
         start_d, end_d = date_range
         lookback_start = start_d - datetime.timedelta(days=365)
         
@@ -998,7 +1075,7 @@ with tab_backtest:
                     sold_vol = log_rets.std() * np.sqrt(252)
                     st.toast(f"Calibration Done: Sold Volatility = {sold_vol:.2%}")
                 
-                # --- 2. DONNÉES BACKTEST ---
+                # --- 2. BACKTEST DATA ---
                 md_bt = MarketData()
                 hist_data = md_bt.get_historical_data(st.session_state.ticker_input, start_d.strftime("%Y-%m-%d"), end_d.strftime("%Y-%m-%d"))
                 
@@ -1007,15 +1084,11 @@ with tab_backtest:
                 else:
                     init_spot = hist_data['Close'].iloc[0]
                     
-                    # NOTE IMPORTANTE : 
-                    # On utilise maintenant 'bt_maturity' (choisi par l'utilisateur) 
-                    # au lieu de calculer la durée du backtest.
-
-                    # --- 3. INSTANCIATION ---
+                    # --- 3. INSTANTIATION ---
                     if p_type == "Phoenix":
                         opt_hedge = PhoenixStructure(
                             S=init_spot, 
-                            T=bt_maturity,  # <--- Utilisation de la maturité choisie (ex: 5.0)
+                            T=bt_maturity, 
                             r=r, 
                             sigma=sold_vol, 
                             q=q,
@@ -1023,7 +1096,7 @@ with tab_backtest:
                             protection_barrier=bt_protection,   
                             coupon_barrier=bt_coupon_bar,       
                             coupon_rate=bt_coupon_rate,         
-                            obs_frequency=4, # Trimestriel
+                            obs_frequency=4, 
                             num_simulations=2000
                         )
                     else:
@@ -1032,14 +1105,14 @@ with tab_backtest:
                         opt_hedge = EuropeanOption(
                             S=init_spot, 
                             K=strike_bt, 
-                            T=bt_maturity, # <--- Utilisation de la maturité choisie (ex: 1.0)
+                            T=bt_maturity, 
                             r=r, 
                             sigma=sold_vol, 
                             q=q, 
                             option_type="Call" if is_call else "Put"
                         )
 
-                    # --- 4. LANCEMENT MOTEUR ---
+                    # --- 4. ENGINE EXECUTION ---
                     hedging_engine = DeltaHedgingEngine(
                         option=opt_hedge, 
                         market_data=hist_data,
@@ -1050,41 +1123,123 @@ with tab_backtest:
                     )
 
                     res, met = hedging_engine.run_backtest()
+
+                    # --- 5. POST-ANALYSIS & ACCOUNTING ---
                     
-                    # Spread de Volatilité
+                    final_date_str = met['Final Date']
+                    duration = met['Duration (Months)']
+                    status = met['Status']
+                    final_S = met['Final Spot']
+                    
+                    # A. Product Status
+                    if p_type == "Phoenix":
+                        coupons = met['Coupons Paid']
+                        st.markdown(f"Status: Product {status} on {final_date_str} "
+                                f"(Duration: {duration:.1f} months). "
+                                f"The client received {coupons} coupons.")
+                    else:
+                        strike_val = init_spot * bt_strike_pct
+                        is_call = "Call" in p_type
+                        
+                        if is_call:
+                            is_itm = final_S > strike_val
+                            condition = "Spot > Strike" if is_itm else "Spot < Strike"
+                            payout_msg = f"Payout: {max(final_S - strike_val, 0):.2f}" if is_itm else "No Payout (Expired Worthless)"
+                        else: # Put
+                            is_itm = final_S < strike_val
+                            condition = "Spot < Strike" if is_itm else "Spot > Strike"
+                            payout_msg = f"Payout: {max(strike_val - final_S, 0):.2f}" if is_itm else "No Payout (Expired Worthless)"
+                        
+                        st.markdown(f"Status: Option Matured on {final_date_str} ({duration:.1f} months). "
+                                f"Final Spot: {final_S:.2f} vs Strike: {strike_val:.2f} ({condition}). "
+                                f"Bank Liability: {payout_msg}")
+
+                    # B. Financials Breakdown
+                    premium = met['Option Premium']
+                    costs = met['Total Transaction Costs']
+                    
+                    if p_type == "Phoenix":
+                        total_payout_paid = met['Phoenix Payouts Included']
+                        net_pnl = met['Engine P&L'] 
+                        # Trading P&L approximation for Phoenix
+                        trading_result = net_pnl - premium + total_payout_paid + costs
+                    else:
+                        # Vanilla: Re-calculate payout (since Engine ignores it)
+                        if is_call: vanilla_payout = max(final_S - strike_val, 0.0)
+                        else:       vanilla_payout = max(strike_val - final_S, 0.0)
+                        
+                        total_payout_paid = vanilla_payout
+                        net_pnl = met['Engine P&L'] - vanilla_payout
+                        # Trading P&L = Engine Result - Premium + Costs
+                        trading_result = met['Engine P&L'] - premium + costs
+
+                    # --- 6. KPI DISPLAY ---
+                    st.subheader("Performance Breakdown")
+                    
+                    # Volatility Spread Logic
+                    # Spread = Priced (Sold) - Realized
                     vol_spread = met['Pricing Volatility'] - met['Realized Volatility']
-                    is_winner = vol_spread > 0
                     
-                    # Status Phoenix (si applicable)
-                    if p_type == "Phoenix" and 'Status' in met:
-                         st.info(f"**Product Status:** {met['Status']} on {met['Final Date']} "
-                                f"after {met['Duration (Months)']:.1f} months. "
-                                f"({met['Coupons Paid']} coupons paid)")
+                    if p_type == "Phoenix":
+                        # Phoenix (Issuer is Long Vega):
+                        # We benefit if Realized > Priced (Spread is Negative).
+                        # Negative = Good -> We need "inverse" mode.
+                        vol_color_mode = "inverse"
+                        help_vol = "For Phoenix (Bank Long Vega): Green if Realized Volatility is higher than Pricing Volatility (Negative spread is profitable)."
+                    else:
+                        # Vanilla Short (Issuer is Short Vega):
+                        # We benefit if Realized < Priced (Spread is Positive).
+                        # Positive = Good -> We need "normal" mode.
+                        vol_color_mode = "normal"
+                        help_vol = "For Short Option (Bank Short Vega): Green if Realized Volatility is lower than Pricing Volatility (Positive spread means Theta gain)."
+
+                    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+                    kpi1.metric("Premium Received", f"+{premium:.2f}", help="Cash received at inception (Short Position)")
+                    kpi2.metric("Payout Paid", f"-{total_payout_paid:.2f}", help="Cash paid to client at maturity (or accumulated coupons)")
+                    kpi3.metric("Trans. Costs", f"-{costs:.2f}", help="Accumulated transaction costs from rebalancing")
+                    
+                    # Corrected Vol Spread Metric
+                    kpi4.metric("Vol Spread", f"{vol_spread*100:+.2f} pts", 
+                                delta=vol_spread, 
+                                delta_color=vol_color_mode, # Fixed based on Product Type
+                                help=help_vol)
 
                     st.divider()
                     
-                    kpi1, kpi2, kpi3, kpi4, kpi5, kpi6 = st.columns(6)
-                    kpi1.metric("Initial Premium", f"{met['Option Premium']:.2f} €", help="Cash reçu à la vente (t=0)")
-                    kpi2.metric("Sold Volatility", f"{met['Pricing Volatility']:.2%}", help="Volatilité estimée à la vente (N-1)")
-                    kpi3.metric("Realized Volatility", f"{met['Realized Volatility']:.2%}", help="Volatilité subie pendant le backtest")
-                    kpi4.metric("Vol Spread", f"{vol_spread*100:+.2f} pts", delta_color="normal" if is_winner else "inverse")
-                    kpi5.metric("Avg Delta", f"{res['Delta'].abs().mean():.2f}")
-                    kpi6.metric("Hedge Error", f"{met['Hedge Error Std']:.2f}")
+                    # NET P&L
+                    c_final1, c_final2 = st.columns([1, 1])
                     
-                    c_pnl1, c_pnl2, c_pnl3, c_pnl4, c_pnl5 = st.columns(5)
+                    with c_final1:
+                        st.markdown("##### Trading Activity (Gamma P&L)")
+                        st.metric("Trading Result", f"{trading_result:+.2f}", 
+                                  help="Pure result from dynamic hedging (Buy Low / Sell High). Independent of the premium.")
                     
-                    c_pnl1.metric("1. Premium Received", f"+{met['Option Premium']:.2f} €", help="Argent reçu à la vente (J0)")
-                    c_pnl2.metric("2. Trading P&L", f"{met['Trading P&L (Gross)']:.2f} €", help="Gain/Perte brut sur les actions (Gamma Trading)")
-                    c_pnl3.metric("3. Payouts Paid", f"-{met['Total Payouts']:.2f} €", help="Coupons + Remboursement versés au client")
-                    c_pnl4.metric("4. Trans. Costs", f"-{met['Total Transaction Costs']:.2f} €", help="Frais de courtage cumulés")
-                    
-                    # P&L NET
-                    net_color = "normal" if met['Total P&L'] >= 0 else "inverse"
-                    c_pnl5.metric("= NET P&L", f"{met['Total P&L']:.2f} €", delta=met['Total P&L'], delta_color=net_color)
-                    
+                    with c_final2:
+                        st.markdown("##### Net Profit / Loss")
+                        color = "normal" if net_pnl >= 0 else "inverse"
+                        st.metric("Total Net P&L", f"{net_pnl:+.2f}", delta=net_pnl, delta_color=color,
+                                  help="Net P&L = Premium + Trading Result - Payout - Costs")
+                                
                     st.caption("Equation: Net P&L = Premium + Trading P&L - Payouts - Costs")
                     
+                    # --- METHODOLOGY EXPANDER (UPDATED) ---
+                    with st.expander("Backtesting Methodology & Assumptions"):
+                        st.markdown(r"""
+                        **Initialization**
+                        * **Short Position:** The simulation assumes the bank sells the option at $t_0$.
+                        * **Pricing:** The premium is collected based on the **Implied Volatility** (calibrated on the 12-month historical window prior to start).
 
+                        **Trading P&L (Gamma Scalping)**
+                        * **Mechanism:** The engine simulates a Daily/Weekly delta-hedging strategy.
+                        * **Gamma Bleed:** Being Short Gamma (Short Option), the bank must buy high and sell low to stay Delta Neutral. This generates a trading loss (cost) that is theoretically offset by the Theta (time decay) collected.
+                        * **Visualization:** The charts strictly display this rebalancing activity. Entry and Exit cash flows are excluded from the charts to preserve scale.
+
+                        **Net P&L Calculation**
+                        * The final result combines two distinct components:
+                            1.  **Fixed Flows:** Premium received - Final Payout (Liability).
+                            2.  **Trading Flows:** The cumulative result of the hedging process - Transaction Costs.
+                        """)
+                        
                     t1, t2 = st.tabs(["Analysis Dashboard", "Delta History"])
                     with t1:
                         fig_bt = hedging_engine.plot_pnl()
