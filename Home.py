@@ -177,7 +177,6 @@ with col1:
 # --- CARTE 2 : ALPHATREND ---
 with col2:
     with st.container(border=True):
-        # TITRE CENTRÉ VIA HTML
         st.markdown("<h3 style='text-align: center;'>AlphaTrend Strategy</h3>", unsafe_allow_html=True)
         
         st.markdown("""
@@ -189,16 +188,16 @@ with col2:
         
         b_col1, b_col2 = st.columns(2)
         with b_col1:
+            # Bouton visuellement "Primary" (Vert) mais logique WIP
             if st.button("Explore", key="btn_invest", type="primary", use_container_width=True):
-                st.switch_page("pages/02_AlphaTrend_Strategy.py") 
+                st.toast("🚧 Work in Progress! Please check the Methodology for details.", icon="⚠️")
         with b_col2:
             if st.button("Methodology", key="story_p2", use_container_width=True):
-                show_methodology("AlphaTrend: Beta Neutral", story_p2)
+                show_methodology("AlphaTrend: Beta Neutral (In Dev)", story_p2)
 
 # --- CARTE 3 : ROBUST COVARIANCE ---
 with col3:
     with st.container(border=True):
-        # TITRE CENTRÉ VIA HTML
         st.markdown("<h3 style='text-align: center;'>Robust Covariance</h3>", unsafe_allow_html=True)
         
         st.markdown("""
@@ -210,8 +209,9 @@ with col3:
         
         b_col1, b_col2 = st.columns(2)
         with b_col1:
+            # Bouton visuellement "Primary" (Vert) mais logique WIP
             if st.button("Explore", key="btn_vol", type="primary", use_container_width=True):
-                st.switch_page("pages/03_Robust_Covariance.py")
+                st.toast("🚧 Work in Progress! Please check the Methodology for details.", icon="⚠️")
         with b_col2:
             if st.button("Methodology", key="story_p3", use_container_width=True):
-                show_methodology("Robust Covariance Estimation", story_p3)
+                show_methodology("Robust Covariance Estimation (In Dev)", story_p3)
