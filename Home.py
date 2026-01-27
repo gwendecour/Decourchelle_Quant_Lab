@@ -190,7 +190,7 @@ with col2:
         with b_col1:
             # Bouton visuellement "Primary" (Vert) mais logique WIP
             if st.button("Explore", key="btn_invest", type="primary", use_container_width=True):
-                st.toast("🚧 Work in Progress! Please check the Methodology for details.", icon="⚠️")
+                st.switch_page("pages/02_AlphaTrend_Strategy.py")
         with b_col2:
             if st.button("Methodology", key="story_p2", use_container_width=True):
                 show_methodology("AlphaTrend: Beta Neutral (In Dev)", story_p2)

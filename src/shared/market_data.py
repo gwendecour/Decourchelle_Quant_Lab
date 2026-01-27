@@ -113,146 +113,48 @@ class MarketData:
         except Exception as e:
             return None
 
-    # ==========================================================================
-    # OBSOLETE / MAINTENANCE : EURONEXT CHAIN
-    # Désactivé temporairement car l'API Euronext bloque les requêtes automatisées
-    # ==========================================================================
-    """
-
     @staticmethod
-    def get_euronext_chain(root_ticker="GL1", exchange="DPAR", maturity="12-2026"):
-    
-        Récupère la chaîne d'options. 
-        Tente d'abord Euronext Live, et bascule sur le BACKUP JSON si échec.
-        
-        url = f"https://live.euronext.com/en/ajax/getPricesOptionsAjax/stock-options/{root_ticker}/{exchange}"
-        
-        # Headers "Naviguateur Réel" pour éviter le blocage 403
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Referer": f"https://live.euronext.com/en/product/stock-options/{root_ticker}-{exchange}",
-            "Accept": "application/json, text/javascript, */*; q=0.01",
-            "X-Requested-With": "XMLHttpRequest"
-        }
-        
-        payload = {
-            "md[]": maturity,
-            "revol": "yes"
-        }
-
-        print(f"--- Connecting to Euronext ({root_ticker} / {maturity}) ---")
-        
-        # 1. TENTATIVE DE CONNEXION
-        json_data = None
-        using_backup = False
-        
+    def get_clean_multiticker_data(tickers, start_date, end_date):
+        """
+        Télécharge, nettoie et calcule un score de qualité des données.
+        Version robuste aux changements de colonnes de yfinance.
+        """
         try:
-            response = requests.post(url, data=payload, headers=headers, timeout=5)
-            if response.status_code == 200:
-                json_data = response.json()
-                # Vérification que le JSON contient bien des données valides
-                if not json_data or 'extended' not in json_data or not json_data['extended'] or json_data['extended'][0] is None:
-                     raise ValueError("JSON vide ou invalide reçu d'Euronext")
+            # Téléchargement
+            raw_data = yf.download(tickers, start=start_date, end=end_date, progress=False)
+            
+            if raw_data.empty:
+                print("Erreur: Le DataFrame téléchargé est vide.")
+                return None, None
+
+            # Sélection intelligente de la colonne de prix
+            # yf.download renvoie un MultiIndex si plusieurs tickers.
+            if 'Adj Close' in raw_data.columns:
+                raw_df = raw_data['Adj Close']
+            elif 'Close' in raw_data.columns:
+                raw_df = raw_data['Close']
+                print("Warning: 'Adj Close' non trouvé, utilisation de 'Close'.")
             else:
-                raise ConnectionError(f"Status Code: {response.status_code}")
-                
+                print(f"Colonnes disponibles : {raw_data.columns}")
+                return None, None
+
+            # Diagnostic avant nettoyage
+            total_points = raw_df.size
+            missing_values_per_ticker = raw_df.isna().sum()
+            total_missing = missing_values_per_ticker.sum()
+            
+            ffill_ratio = (total_missing / total_points) * 100 if total_points > 0 else 0
+            
+            # Nettoyage
+            clean_df = raw_df.ffill().dropna(how='all')
+            
+            metadata = {
+                'global_ffill_rate': ffill_ratio,
+                'is_reliable': ffill_ratio < 5.0
+            }
+            
+            return clean_df, metadata
+
         except Exception as e:
-            print(f">> ÉCHEC CONNEXION EURONEXT ({e}).")
-            print(">> ACTIVATION DU MODE BACKUP (Données statiques).")
-            json_data = json.loads(BACKUP_JSON_DATA)
-            using_backup = True
-
-        # 2. PARSING DES DONNÉES (Valable pour Live et Backup)
-        try:
-            data_by_strike = {}
-
-            def clean_price(val):
-                if isinstance(val, (int, float)): return float(val)
-                if not val or not isinstance(val, str) or val in ['-', 'None', '']: return np.nan
-                # Nettoyage HTML si présent
-                text = re.sub(r'<[^>]+>', '', val).replace(',', '').strip()
-                return float(text) if text else np.nan
-
-            def extract_strike(val):
-                if isinstance(val, (int, float)): return float(val)
-                # Si c'est du HTML <a...>55.00</a>
-                if '<' in str(val):
-                    match = re.search(r'>([\d\.,]+)<', str(val))
-                    if match:
-                        return float(match.group(1).replace(',', ''))
-                # Si c'est juste du texte "55.00"
-                return clean_price(val)
-
-            # Parcours des blocs (au cas où Euronext change l'ordre)
-            found_data = False
-            if 'extended' in json_data:
-                for block in json_data['extended']:
-                    if not block: continue
-                    
-                    found_data = True
-                    
-                    # Calls
-                    for item in block.get('rowc', []):
-                        k = extract_strike(item.get('strike'))
-                        if not k or np.isnan(k): continue
-                        
-                        if k not in data_by_strike: data_by_strike[k] = {}
-                        data_by_strike[k]['Call_Bid'] = clean_price(item.get('best_bid'))
-                        data_by_strike[k]['Call_Ask'] = clean_price(item.get('best_ask'))
-                        data_by_strike[k]['Call_Last'] = clean_price(item.get('last'))
-
-                    # Puts (le backup n'a pas forcément de puts, mais le live oui)
-                    for item in block.get('rowp', []):
-                        k = extract_strike(item.get('strike'))
-                        if not k or np.isnan(k): continue
-                        
-                        if k not in data_by_strike: data_by_strike[k] = {}
-                        data_by_strike[k]['Put_Bid'] = clean_price(item.get('best_bid'))
-                        data_by_strike[k]['Put_Ask'] = clean_price(item.get('best_ask'))
-                        data_by_strike[k]['Put_Last'] = clean_price(item.get('last'))
-
-            if not found_data and not using_backup:
-                # Si le live n'a rien donné malgré un JSON valide (rare), on force le backup
-                print(">> Données Live vides. Force Backup.")
-                json_data = json.loads(BACKUP_JSON_DATA)
-                # On relance un parsing rapide du backup (récursivité simplifiée)
-                # ... (code simplifié : on suppose que le backup fonctionne au prochain appel ou on renvoie vide)
-                # Pour éviter la complexité, on retourne le dataframe vide ici si le backup n'a pas été chargé au début
-                return pd.DataFrame()
-
-            # 3. FORMATAGE DATAFRAME
-            rows = []
-            for strike, data in data_by_strike.items():
-                row = {'Strike': strike, 'Maturity': maturity}
-                row.update(data)
-                rows.append(row)
-            
-            df = pd.DataFrame(rows)
-            if df.empty:
-                return pd.DataFrame()
-
-            df = df.sort_values('Strike').reset_index(drop=True)
-            
-            # Compléter les colonnes manquantes (ex: Put si on est en Backup Calls only)
-            cols_needed = ['Call_Bid', 'Call_Ask', 'Call_Last', 'Put_Bid', 'Put_Ask', 'Put_Last']
-            for col in cols_needed:
-                if col not in df.columns:
-                    df[col] = np.nan
-            
-            print(f"Success! Retrieved {len(df)} strikes ({'BACKUP' if using_backup else 'LIVE'}).")
-            return df[['Strike', 'Maturity', 'Call_Bid', 'Call_Ask', 'Call_Last', 'Put_Bid', 'Put_Ask', 'Put_Last']]
-            
-        except Exception as e:
-            print(f"Parsing Failed: {e}")
-            return pd.DataFrame()
-
-    @staticmethod
-    def get_historical_data(ticker, start_date, end_date):
-        try:
-            stock = yf.Ticker(ticker)
-            df = stock.history(start=start_date, end=end_date)
-            if df.empty: return None
-            return df['Close']
-        except Exception as e:
-            return None
-            """
+            print(f"Erreur critique dans get_clean_multiticker_data: {e}")
+            return None, None
