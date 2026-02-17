@@ -14,25 +14,18 @@ class BacktestEngine:
         self.universe = universe
         self.initial_capital = initial_capital
 
-    def run(self, start_date, freq='ME', signal_method='z_score', top_n=2, hedge_on=True, lookback=126,  corr_threshold=0.6):
+    # 1. AJOUT DE L'ARGUMENT corr_lookback=60 DANS LA SIGNATURE
+    def run(self, start_date, freq='ME', signal_method='z_score', top_n=2, hedge_on=True, lookback=126, corr_threshold=0.6, corr_lookback=60):
         """
         Runs the backtest simulation.
-        
-        Args:
-            start_date (datetime): Start date of the simulation.
-            freq (str): Rebalancing frequency ('ME', 'W-FRI', 'QE').
-            signal_method (str): Method for signal generation ('z_score', 'rsi', 'distance_ma').
-            top_n (int): Number of assets to select per category.
-            corr_threshold (float): Correlation threshold for diversification.
-            lookback (int): Lookback period for momentum calculation (default 126).
-            hedge_on (bool): Whether to apply beta hedging (default True).
         """
-        # Dates de décision selon la fréquence choisie
-        # Use 'ME' (Month End) instead of 'M' which is deprecated in newer pandas versions
+        # Dates de décision
         rebalance_dates = self.data[start_date:].resample(freq).last().index
         
         history = []
         current_nav = self.initial_capital
+        
+        self.selections_history = {} 
         
         # Initialisation
         weights = {}
@@ -43,61 +36,92 @@ class BacktestEngine:
             t1 = rebalance_dates[i+1]
             past_data = self.data.loc[:t0]
 
-            # --- 1. SELECTION DES ACTIFS (Rééquilibrage selon freq) ---
+            # --- 1. SELECTION DES ACTIFS ---
             sig_gen = MomentumSignals(past_data)
             
-            # Appel dynamique de la méthode (Z-score, RSI, etc.)
+            # Calcul des scores
             scores_by_cat = {}
             if signal_method == 'z_score':
-                # Pass lookback to the signal generator
                 scores_by_cat = sig_gen.get_z_score_momentum(self.universe, lookback=lookback)
             elif signal_method == 'rsi':
-                # RSI typically uses a fixed shorter window (e.g., 14), but logic is similar
                 rsi_values = sig_gen.get_rsi()
                 scores_by_cat = {cat: rsi_values[tickers] for cat, tickers in self.universe.items() if all(t in rsi_values.index for t in tickers)}
             elif signal_method == 'distance_ma':
-                 # Assuming you implement get_distance_ma in signals.py
                  ma_scores = sig_gen.get_distance_ma(window=lookback)
                  scores_by_cat = {cat: ma_scores[tickers] for cat, tickers in self.universe.items() if all(t in ma_scores.index for t in tickers)}
 
             constructor = PortfolioConstructor(past_data, self.universe)
             
-            # Safety check: ensure scores exist before calling constructor
+            # Allocation
             if scores_by_cat:
-                selected_assets = {cat: constructor.get_diversified_top_n(scores, cat, top_n, corr_threshold) 
-                                   for cat, scores in scores_by_cat.items()}
+                # 2. TRANSMISSION DE L'ARGUMENT AU CONSTRUCTEUR
+                selected_assets = {
+                    cat: constructor.get_diversified_top_n(
+                        scores, 
+                        cat, 
+                        top_n, 
+                        corr_threshold, 
+                        corr_lookback=corr_lookback # <--- C'EST ICI QU'ON PASSE LA VARIABLE
+                    ) 
+                    for cat, scores in scores_by_cat.items()
+                }
                 weights = constructor.compute_weights(selected_assets)
             else:
                  weights = {"CASH": 1.0}
 
-            # --- 2. CALCUL DU HEDGE (Beta Neutral) ---
+            # ... (Le reste de la fonction reste identique) ...
+            
+            # Enregistrement Vérité Terrain
+            selected_tickers_list = [t for t, w in weights.items() if w > 0 and t != 'CASH']
+            self.selections_history[t0] = selected_tickers_list
+
+            # Calcul Hedge
             if hedge_on:
                 hedge_mgr = BetaHedgeManager(past_data)
                 hedge_ratio, _ = hedge_mgr.get_hedge_ratio(weights)
             else:
                 hedge_ratio = 0.0
 
-            # --- 3. CALCUL DE LA PERFORMANCE ---
-            # On boucle jour par jour entre t0 et t1
-            # iloc[1:] avoids recalculating t0
+            # Calcul Perf & Drift
+            current_positions = {}
+            for t, w in weights.items():
+                current_positions[t] = current_nav * w
+            
+            if 'CASH' not in current_positions:
+                current_positions['CASH'] = 0.0
+            
             daily_period_data = self.returns.loc[t0:t1].iloc[1:] 
             
             for date, daily_rets in daily_period_data.iterrows():
-                # Performance du Long
-                long_ret = sum(daily_rets[t] * w for t, w in weights.items() if t in daily_rets)
+                for t in list(current_positions.keys()):
+                    if t != 'CASH':
+                        ret = daily_rets.get(t, 0.0)
+                        current_positions[t] *= (1 + ret)
                 
-                # Performance du Short (Hedge)
-                # If market (SPY) goes up, short position loses value
-                short_ret = hedge_ratio * daily_rets.get('SPY', 0.0)
+                spy_ret = daily_rets.get('SPY', 0.0)
+                short_pnl = (current_nav * hedge_ratio) * (-spy_ret)
+                current_positions['CASH'] += short_pnl
                 
-                # Update NAV
-                current_nav *= (1 + long_ret + short_ret)
-                history.append({'Date': date, 'NAV': current_nav, 'Daily_Ret': long_ret + short_ret})
+                current_nav = sum(current_positions.values())
+                
+                snapshot = {'Date': date, 'NAV': current_nav, 'Hedge Ratio': hedge_ratio}
+                
+                if current_nav > 0:
+                    for t, amount in current_positions.items():
+                        snapshot[t] = amount / current_nav
+                else:
+                    for t in current_positions:
+                        snapshot[t] = 0.0
+                
+                history.append(snapshot)
 
         if not history:
-             return pd.DataFrame()
+             return {}
              
-        return pd.DataFrame(history).set_index('Date')
+        full_hist_df = pd.DataFrame(history).set_index('Date')
+        
+        return {'NAV': full_hist_df['NAV'], 'Hedge Ratio': full_hist_df['Hedge Ratio'], 'Weights': full_hist_df.drop(columns=['NAV', 'Hedge Ratio']), 'Selections': self.selections_history}
+    
 
     def run_risk_parity_benchmark(self, start_date, lookback=126):
         """
