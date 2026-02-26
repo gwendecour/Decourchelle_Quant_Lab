@@ -10,6 +10,7 @@ from src.derivatives.instruments import InstrumentFactory
 from src.derivatives.pricing_model import EuropeanOption
 from src.derivatives.structured_products import PhoenixStructure
 from src.derivatives.backtester import DeltaHedgingEngine
+import src.derivatives.analytics as analytics
 from src.shared.ui import render_header
 
 # --- PAGE CONFIGURATION ---
@@ -443,14 +444,14 @@ with tab_pricing:
                 obs_frequency=4, num_simulations=n_sims
             )
             price = product.price()
-            fig_main = product.plot_payoff(spot_range=[S*0.5, S*1.5])
+            fig_main = analytics.plot_payoff(product, spot_range=[S*0.5, S*1.5])
             metric_lbl, metric_val = "Barrier", f"{S*st.session_state.barrier_pct:.2f} €"
         else:
             strike_val = S * (st.session_state.strike_pct / 100.0)
             opt_type = "Call" if "Call" in p_type else "Put"
             product = EuropeanOption(S=S, K=strike_val, T=maturity, r=r, sigma=sigma, q=q, option_type=opt_type)
             price = product.price()
-            fig_main = product.plot_payoff(spot_range=[S*0.6, S*1.4])
+            fig_main = analytics.plot_payoff(product, spot_range=[S*0.6, S*1.4])
             metric_lbl, metric_val = "Moneyness", f"{(S/strike_val)*100:.1f}%"
 
         # KPIs
@@ -539,7 +540,7 @@ with tab_pricing:
     with graph_col1:
         st.markdown("**Price Sensitivity to Strike**")
         with st.spinner("Computing..."):
-            fig_struct = product.plot_price_vs_strike(current_spot=S)
+            fig_struct = analytics.plot_price_vs_strike(product, current_spot=S)
             st.plotly_chart(fig_struct, use_container_width=True, config={'displayModeBar': False})
 
             if p_type == "Call":
@@ -553,7 +554,7 @@ with tab_pricing:
     with graph_col2:
         st.markdown("**Price Sensitivity to Volatility**")
         with st.spinner("Computing..."):
-            fig_vol = product.plot_price_vs_vol(current_vol=sigma)
+            fig_vol = analytics.plot_price_vs_vol(product, current_vol=sigma)
             st.plotly_chart(fig_vol, use_container_width=True, config={'displayModeBar': False})
             if p_type in ["Call", "Put"]:
                 note_vol = "**Trend:** Positive Vega. Long options benefit from higher uncertainty/volatility."
@@ -928,7 +929,7 @@ with tab_greeks:
         with st.spinner("Computing Greeks Profile..."):
             # prod_gk object already contains dyn_spot (red point) 
             # and fixed_strike (dotted line)
-            fig_structure = prod_gk.plot_greeks_profile()
+            fig_structure = analytics.plot_greeks_profile(prod_gk)
             st.plotly_chart(fig_structure, use_container_width=True)
             
     elif p_type == "Phoenix":
@@ -1194,7 +1195,7 @@ with tab_backtest:
                         
                     t1, t2 = st.tabs(["Analysis Dashboard", "Delta History"])
                     with t1:
-                        fig_bt = hedging_engine.plot_pnl()
+                        fig_bt = analytics.plot_pnl(hedging_engine)
                         if fig_bt: st.plotly_chart(fig_bt, use_container_width=True, key="chart_pnl_unique")
                         else: st.warning("No data.")
                     with t2:
