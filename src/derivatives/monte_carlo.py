@@ -4,8 +4,6 @@ from src.derivatives.pricing_model import EuropeanOption
 class MonteCarloEngine:
     
     def __init__(self, S, K, T, r, sigma, q, num_simulations=100, num_steps=252, seed=None):
-
-        # Market Parameters
         self.S = float(S)
         self.K = float(K)
         self.T = float(T)
@@ -13,10 +11,9 @@ class MonteCarloEngine:
         self.sigma = float(sigma)
         self.q = float(q)
         
-        # Simulation Parameters
-        self.N = int(num_simulations) # Number of columns
-        self.M = int(num_steps)       # Number of rows (time steps)
-        self.dt = T / num_steps       # The size of one step (e.g., 1/252)
+        self.N = int(num_simulations) 
+        self.M = int(num_steps)       
+        self.dt = T / num_steps       
         self.seed = seed
         
     def generate_paths(self):
@@ -28,25 +25,16 @@ class MonteCarloEngine:
         if self.seed is not None:
             np.random.seed(self.seed)
         
-        # Generate all the possible Z (in a matrix)
         Z = np.random.standard_normal((self.M, self.N))
         drift = (self.r - self.q - 0.5*self.sigma**2)*self.dt
         diffusion_multiplicator = self.sigma*np.sqrt(self.dt)
-        """
-        V1 using 2 loops
-        for i in range(1,self.M+1):
-            for j in range (self.N): 
-                A[i][j] = A[i-1][j]*np.exp(drift+diffusion_multiplicator*Z[i-1][j])
-                
-        Using vectorization, we obtain a function way more efficient
-        """
+        
         for i in range(1, self.M+1):
             A[i] = A[i-1] * np.exp(drift + diffusion_multiplicator * Z[i-1])
         
         return A
     
     
-    # Now we want to prove the convergence of the average path option price to the BSM price
     def price_european_call(self):
         
         A = self.generate_paths()

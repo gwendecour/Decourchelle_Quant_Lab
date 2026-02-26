@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import datetime
 
-# --- IMPORTS MODULES ---
+# --- MODULE IMPORTS ---
 from src.shared.market_data import MarketData
 from src.derivatives.instruments import InstrumentFactory
 from src.derivatives.pricing_model import EuropeanOption
@@ -12,7 +12,7 @@ from src.derivatives.structured_products import PhoenixStructure
 from src.derivatives.backtester import DeltaHedgingEngine
 from src.shared.ui import render_header
 
-# --- CONFIGURATION PAGE ---
+# --- PAGE CONFIGURATION ---
 st.set_page_config(page_title="Pricing Engine", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""
@@ -24,7 +24,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# CSS pour l'alignement des inputs/sliders
+# CSS for inputs/sliders alignment
 st.markdown("""
     <style>
         .block-container {padding-top: 1rem; padding-bottom: 2rem;}
@@ -48,40 +48,32 @@ defaults = {
 for key, val in defaults.items():
     if key not in st.session_state: st.session_state[key] = val
 
-# On initialise les clés de l'onglet Greeks pour qu'elles existent même si on est sur l'onglet 1
+# Initialize Greeks tab keys to ensure existence
 if 'gk_spot' not in st.session_state: st.session_state['gk_spot'] = st.session_state['custom_spot']
 if 'gk_vol' not in st.session_state: st.session_state['gk_vol'] = st.session_state['custom_vol']
 if 'gk_rate' not in st.session_state: st.session_state['gk_rate'] = st.session_state['custom_rate']
 
-# --- HELPER POUR METTRE A JOUR TOUS LES WIDGETS ---
+# --- INITIALIZATION & SYNCHRONIZATION HELPERS ---
 def update_all_widget_keys(spot=None, vol=None, rate=None, div=None, strike=None, maturity=None):
-    """Met à jour les variables d'état et force le rafraîchissement visuel des widgets"""
+    """Updates state variables and triggers widget refresh."""
     if spot is not None:
         val = float(spot)
-        # Tab 1 & Global
         st.session_state.custom_spot = val
         st.session_state['sl_custom_spot'] = val
         st.session_state['num_custom_spot'] = val
-        # st.session_state['gk_spot'] = val  <-- INUTILE MAINTENANT (On utilise sim_spot_val)
         
-        # --- TAB 2 (GREEKS) ---
-        # 1. Update Fixed Strike
         st.session_state['fix_strike_input'] = val
         
-        # 2. Update Sim Spot (Interne + Widgets)
         st.session_state['sim_spot_val'] = val
-        st.session_state['gk_slider_spot'] = val # Force le slider visuel
-        st.session_state['gk_box_spot'] = val    # Force la box visuelle
+        st.session_state['gk_slider_spot'] = val
+        st.session_state['gk_box_spot'] = val
 
     if vol is not None:
         val = float(vol)
-        # Tab 1 & Global
         st.session_state.custom_vol = val
         st.session_state['sl_custom_vol'] = val
         st.session_state['num_custom_vol'] = val
-        # st.session_state['gk_vol'] = val <-- INUTILE
         
-        # Tab 2
         st.session_state['gk_vol_slider'] = val * 100.0
 
     if rate is not None:
@@ -106,41 +98,31 @@ def update_all_widget_keys(spot=None, vol=None, rate=None, div=None, strike=None
         if 'num_maturity_greeks' in st.session_state: st.session_state['num_maturity_greeks'] = new_mat
 
 def sync_sim_to_strike():
-    """Aligne le Spot Simulé sur la valeur du Strike Fixe"""
+    """Aligns the Simulated Spot with the Fixed Strike value."""
     new_val = st.session_state.fix_strike_input
     st.session_state.sim_spot_val = new_val
     st.session_state.slider_sim_spot = new_val
     st.session_state.box_sim_spot = new_val
 
-# --- Fonctions de synchro Slider <-> Input (TAB 1) ---
+# --- Slider <-> Input synchronization functions (TAB 1) ---
 def sync_input(master_key, changed_widget_key):
-    """
-    Synchronise Slider <-> Number Input <-> Master Value
-    Et passe le ticker en CUSTOM si on touche aux valeurs.
-    """
-    # 1. On récupère la nouvelle valeur de celui qui a bougé
+    """Synchronizes Slider <-> Number Input and activates CUSTOM mode."""
     new_value = st.session_state[changed_widget_key]
-    
-    # 2. On met à jour la clé MAÎTRE (utilisée pour les calculs)
     st.session_state[master_key] = new_value
     
-    # 3. On met à jour le FRÈRE JUMEAU (pour l'affichage)
     if "sl_" in changed_widget_key:
-        # C'est le Slider qui a bougé -> On force la Box
         st.session_state[f"num_{master_key}"] = new_value
     else:
-        # C'est la Box qui a bougé -> On force le Slider
         st.session_state[f"sl_{master_key}"] = new_value
         
-    # 4. On désélectionne le Ticker (Passage en mode manuel)
     st.session_state.ticker_input = "CUSTOM"
 
 def make_input_group(label, key_base, min_v, max_v, step, format_str="%.2f"):
     """Crée un slider et un input box synchronisés"""
     
-    # --- CRUCIAL : FORCER LA SYNCHRO AVANT AFFICHAGE ---
-    # Si on vient de faire un Reset, key_base a changé, mais pas sl_... ni num_...
-    # On force donc les widgets à s'aligner sur la valeur maître actuelle.
+    # --- CRUCIAL: FORCE SYNC BEFORE DISPLAY ---
+    # After a Reset, key_base changes, but sl_... and num_... do not.
+    # Therefore, force widgets to align with the current master value.
     current_master_val = float(st.session_state[key_base])
     st.session_state[f"sl_{key_base}"] = current_master_val
     st.session_state[f"num_{key_base}"] = current_master_val
@@ -167,14 +149,11 @@ def make_input_group(label, key_base, min_v, max_v, step, format_str="%.2f"):
             label_visibility="hidden"
         )
 
-# --- Fonction de synchro TAB 2 (Greeks) vers le reste ---
+# --- Synchronize from TAB 2 (Greeks) to the rest ---
 def sync_from_greeks_tab(): 
-    # On met à jour la Source de Vérité
     st.session_state.custom_spot = st.session_state.gk_spot
     st.session_state.custom_vol = st.session_state.gk_vol
     st.session_state.custom_rate = st.session_state.gk_rate
-    
-    # On propage vers les widgets du Tab 1
     st.session_state['sl_custom_spot'] = st.session_state.gk_spot
     st.session_state['num_custom_spot'] = st.session_state.gk_spot
     st.session_state['sl_custom_vol'] = st.session_state.gk_vol
@@ -183,32 +162,26 @@ def sync_from_greeks_tab():
     st.session_state['num_custom_rate'] = st.session_state.gk_rate
 
 def reset_phoenix_props():
-    """Réinitialise uniquement les propriétés du Phoenix (Barrières, Coupon)"""
+    """Resets Phoenix-specific properties to their default values."""
     st.session_state.coupon_rate = 0.08
     st.session_state.autocall_pct = 1.00
     st.session_state.coupon_barrier_pct = 0.70
     st.session_state.barrier_pct = 0.60
-    # On ne touche PAS aux données de marché ici
 
 
 # --- Callbacks ---
 def switch_to_custom_market():
     """
-    Appelé quand on modifie manuellement Spot/Vol/Rate dans l'onglet Pricing.
-    1. Bascule le Ticker sur 'CUSTOM'.
-    2. Pousse IMMÉDIATEMENT les nouvelles valeurs vers la simulation (Greeks).
+    Triggered by manual updates to Spot/Vol/Rate.
+    Switches ticker to CUSTOM and propagates values to the simulation tab.
     """
-    # 1. Passage visuel en Custom
     st.session_state.ticker_input = "CUSTOM" 
     
-    # 2. Synchronisation du Spot (Tab 1 -> Tab 2)
     new_spot = float(st.session_state.custom_spot)
     st.session_state.sim_spot_val = new_spot
     st.session_state.gk_slider_spot = new_spot
     st.session_state.gk_box_spot = new_spot
     
-    # 3. Synchronisation de la Volatilité (Tab 1 -> Tab 2)
-    # Attention aux échelles : Tab 1 est en décimal (0.20), Tab 2 slider est en % (20.0)
     new_vol = float(st.session_state.custom_vol)
     st.session_state.gk_vol_slider = new_vol * 100.0
 
@@ -220,13 +193,13 @@ def update_market_data():
         rate = MarketData.get_risk_free_rate() or 0.04
         div = MarketData.get_dividend_yield(ticker) or 0.0
         
-        # Sauvegarde des données marché brutes pour le Reset
+        # Save raw market data for reset functionality
         st.session_state.market_spot = float(spot)
         st.session_state.market_vol = float(vol)
         st.session_state.market_rate = float(rate)
         st.session_state.market_div = float(div)
         
-        # Mise à jour des curseurs
+        # Update sliders
         update_all_widget_keys(float(spot), float(vol), float(rate), float(div), strike=100.0)
         
     except Exception as e:
@@ -234,62 +207,57 @@ def update_market_data():
 
 def set_pricing_scenario(scenario_type):
     """
-    Logique Robuste : 
-    1. Récupère TOUJOURS les données de marché brutes (Reference).
-    2. Applique le choc sur cette référence.
-    Cela empêche l'accumulation des modifications (ex: cliquer 2x sur OTM ne baisse pas 2x la vol).
+    Robust Logic:
+    1. Always retrieve the original market data (Reference).
+    2. Apply scenarios directly to the reference to avoid accumulation of modifications.
     """
-    # 1. RECUPERATION REFERENCE (Market Data ou Défaut 100/20%)
+    # 1. Data Retrieval
     ref_spot = st.session_state.get('market_spot')
     ref_vol = st.session_state.get('market_vol')
     ref_rate = st.session_state.get('market_rate')
     ref_div = st.session_state.get('market_div')
     
-    # Fallback si pas de données chargées
+    # Fallback if no data is loaded
     if ref_spot is None: ref_spot = 100.0
     if ref_vol is None: ref_vol = 0.20
     if ref_rate is None: ref_rate = 0.04
     if ref_div is None: ref_div = 0.00
     
-    # Par défaut, on garde la maturité actuelle (sauf pour Time Bleed)
     current_mat = st.session_state.get('maturity', 1.0) 
 
-    # 2. APPLICATION DU SCENARIO
+    # 2. Apply Scenario
     p_type = st.session_state.global_product_type
     
-    # --- SCENARIOS STRUCTURE (Strike Change) ---
+    # --- STRUCTURE SCENARIOS ---
     if scenario_type == "ATM":
-        # Strike = Spot Ref, Vol = Vol Ref
         update_all_widget_keys(spot=ref_spot, vol=ref_vol, strike=100.0)
         
     elif scenario_type == "ITM":
-        # Strike change (80% ou 120%), Spot/Vol = Ref
         new_strike_pct = 80.0 if "Call" in p_type else 120.0
         update_all_widget_keys(spot=ref_spot, vol=ref_vol, strike=new_strike_pct)
         
     elif scenario_type == "OTM":
-        # Strike change, Vol baisse (Skew)
         new_strike_pct = 120.0 if "Call" in p_type else 80.0
-        skewed_vol = max(ref_vol * 0.9, 0.05) # -10% sur la vol ref
+        skewed_vol = max(ref_vol * 0.9, 0.05) # -10% on reference volatility
         update_all_widget_keys(spot=ref_spot, vol=skewed_vol, strike=new_strike_pct)
 
     elif scenario_type == "Reset":
         if ref_spot is not None:
             update_all_widget_keys(spot=ref_spot, vol=ref_vol, rate=ref_rate, div=ref_div, strike=100.0)
         else:
-            # Pas de données marché, reset par défaut
+            # No market data available, defaulting
             update_all_widget_keys(spot=100.0, vol=0.20, rate=0.04, div=0.00, strike=100.0)
 
 def set_greeks_scenario(scenario_type):
     """
-    Gère les scénarios de l'onglet 2 (Stress Test Simulation).
+    Handles Tab 2 scenarios (Stress Test Simulation).
     """
 
     ref_spot = st.session_state.get('fix_strike_input', st.session_state.custom_spot)
     ref_vol = st.session_state.get('market_vol')
-    current_mat = st.session_state.get('gk_fix_mat', 1.0) # Récupère la maturité actuelle
+    current_mat = st.session_state.get('gk_fix_mat', 1.0)
 
-    # Références
+    # References
     if ref_spot is None: ref_spot = 100.0
     if ref_vol is None: ref_vol = 0.20
 
@@ -308,7 +276,7 @@ def set_greeks_scenario(scenario_type):
         st.session_state.gk_vol_slider = new_vol_pct
 
     elif scenario_type == "TimeBleed":
-        # On réduit la maturité de 1 mois, sans toucher au spot/vol
+        # Reduce maturity by 1 month, without affecting spot/vol
         new_mat = max(0.01, current_mat - (1/12))
         st.session_state.gk_fix_mat = new_mat
 
@@ -322,7 +290,6 @@ def set_greeks_scenario(scenario_type):
         else:
             st.session_state.gk_vol_slider = 20.0
             
-        # --- LIGNE A AJOUTER ICI ---
         st.session_state.force_pnl_zero = True
 
 # ==============================================================================
@@ -368,29 +335,28 @@ with st.container(border=True):
         st.button("Load Market Data", on_click=update_market_data, disabled=btn_disabled, use_container_width=True)
         
     with c4:
-        # On vérifie si les données de marché ont été chargées (market_spot n'est plus None)
+        # Verify if market data is loaded
         if st.session_state.get('market_spot') is not None:
             s = st.session_state.custom_spot
             v = st.session_state.custom_vol
             r = st.session_state.custom_rate
             d = st.session_state.custom_div
             
-            # On affiche uniquement si c'est chargé
+            # Display only if loaded
             display_text = f"Spot: <b style='color:black'>{s:.2f}</b> | Vol: <b style='color:black'>{v:.1%}</b> | r: {r:.1%} | q: {d:.1%}"
             
             st.markdown(f"<div style='text-align:right; padding-top:5px; font-family:monospace; color:gray;'>"
                         f"{display_text}</div>", unsafe_allow_html=True)
         else:
-            # Si pas chargé, on ne fait RIEN (vide)
             pass
 
 if not selected_ticker or not selected_product or st.session_state.get('market_spot') is None:
     
-    # Message guidant l'utilisateur selon ce qui manque
+    # Guidance message based on missing selections
     if not selected_ticker or not selected_product:
         st.markdown("**Please select a Ticker AND a Product above.**")
     else:
-        # Si Ticker/Product sont là mais pas les données
+        # Ticker/Product selected but data missing
         st.markdown("**Please click 'Load Market Data' to initialize the Pricing Engine.**")
         
     st.stop()
@@ -408,7 +374,7 @@ p_type = st.session_state.global_product_type
 with tab_pricing:
     layout_col1, layout_col2, layout_col3 = st.columns([1.2, 1, 2], gap="medium")
 
-    # --- INPUTS MARKET ---
+    # --- MARKET INPUTS ---
     with layout_col1:
         st.markdown("### Market")
         make_input_group("Spot ($)", "custom_spot", 10.0, 700.0, 0.5)
@@ -416,13 +382,12 @@ with tab_pricing:
         make_input_group("Rate (r)", "custom_rate", 0.00, 0.20, 0.001, "%.3f")
         make_input_group("Div (q)", "custom_div", 0.00, 0.20, 0.001, "%.3f")
 
-    # --- INPUTS PRODUCT ---
+    # --- PRODUCT INPUTS ---
     with layout_col2:
         st.markdown(f"### {p_type}")
         maturity = st.number_input("Maturity (Years)",value=float(st.session_state.get("maturity", 1.0)),min_value=0.1, step=0.1, key="maturity")
 
         if p_type == "Phoenix":
-            # ... (Les sliders cpn, auto, c_bar, p_bar restent ici au dessus) ...
             cpn = st.slider("Cpn", 0.0, 0.20, st.session_state.get('coupon_rate', 0.08), 0.005)
             st.session_state.coupon_rate = cpn
             auto = st.slider("Autocall (%)", 80, 120, int(st.session_state.get('autocall_pct', 1.0)*100), 5)/100
@@ -437,8 +402,8 @@ with tab_pricing:
             st.markdown("### Resets")
             
 
-            st.button("Reset Market Values", on_click=set_pricing_scenario, args=("Reset",), use_container_width=True, help="Remet Spot/Vol/Rate aux données fetchées")
-            st.button("Reset Properties", on_click=reset_phoenix_props, use_container_width=True, help="Remet Barrières et Coupon par défaut")
+            st.button("Reset Market Values", on_click=set_pricing_scenario, args=("Reset",), use_container_width=True, help="Resets Spot/Vol/Rate to fetched data")
+            st.button("Reset Properties", on_click=reset_phoenix_props, use_container_width=True, help="Resets Barriers and Coupon to default")
 
         elif p_type in ["Call", "Put"]:
             make_input_group("Moneyness (%)", "strike_pct", 50.0, 150.0, 1.0)
@@ -446,9 +411,8 @@ with tab_pricing:
             st.caption(f"Strike: **{strike_price:.2f} €**")
             n_sims = 0
 
-            # --- CAS VANILLA : Structure + Market ---
+            # --- VANILLA CASE: Structure + Market ---
             
-            # Ligne 1 : Structure (Moneyness)
             st.caption("1. Structure / Moneyness")
             b1, b2, b3, b4 = st.columns(4, gap="small")
             with b1: 
@@ -461,14 +425,14 @@ with tab_pricing:
                 st.button("OTM", on_click=set_pricing_scenario, args=("OTM",), use_container_width=True, help="Out The Money")
 
         else:
-            st.error(f"Produit inconnu : {p_type}")
+            st.error(f"Unknown product: {p_type}")
 
             
     # --- OUTPUT ---
     with layout_col3:
         st.markdown("### Analysis")
         
-        # Instanciation
+        # Instantiation
         if p_type == "Phoenix":
             product = PhoenixStructure(
                 S=S, T=maturity, r=r, sigma=sigma, q=q,
@@ -512,7 +476,7 @@ with tab_pricing:
             * $Price = e^{-rT} \cdot \mathbb{E}^{\mathbb{Q}}[\text{Payoff}]$
         """)
             else:
-        # On définit le texte en fonction du type d'option (Call ou Put)
+        # Define text based on Option type
                 if "Call" in p_type:
                     direction = "Call"
                     formula_latex = r"C(S,t) = S e^{-qT} N(d_1) - K e^{-rT} N(d_2)"
@@ -538,11 +502,11 @@ with tab_pricing:
                 """)
         st.divider()
 
-        # Graphique Payoff
+        # Payoff Chart
         st.plotly_chart(fig_main, use_container_width=True)
 
         if p_type == "Phoenix":
-            # Récupération des seuils pour l'affichage
+            # Retrieve thresholds for display
             p_lvl = S * st.session_state.barrier_pct
             c_lvl = S * st.session_state.coupon_barrier_pct
             a_lvl = S * st.session_state.autocall_pct
@@ -565,20 +529,17 @@ with tab_pricing:
              k_val = S * (st.session_state.strike_pct / 100.0)
              st.markdown(f"**Put Payoff:** Client profit if Spot < Strike (**{k_val:.2f} €**). It's the opposite for the bank Short Put")
         
-    # --- LIGNE 2 : ANALYSE SENSIBILITÉ ---
+    # --- ROW 2: SENSITIVITY ANALYSIS ---
     st.divider()
     
-    # Titre de la section
     st.markdown("### Sensitivity Analysis")
     
     graph_col1, graph_col2 = st.columns(2, gap="medium")
 
     with graph_col1:
-        # Titre propre en anglais, sans icône, sans répétition
         st.markdown("**Price Sensitivity to Strike**")
         with st.spinner("Computing..."):
             fig_struct = product.plot_price_vs_strike(current_spot=S)
-            # use_container_width=True permet d'occuper toute la colonne
             st.plotly_chart(fig_struct, use_container_width=True, config={'displayModeBar': False})
 
             if p_type == "Call":
@@ -590,7 +551,6 @@ with tab_pricing:
             st.caption(note)
             
     with graph_col2:
-        # Titre propre en anglais
         st.markdown("**Price Sensitivity to Volatility**")
         with st.spinner("Computing..."):
             fig_vol = product.plot_price_vs_vol(current_vol=sigma)
@@ -607,11 +567,11 @@ with tab_pricing:
 with tab_greeks:
     st.subheader("Greeks Sensitivity Analysis")
 
-    # Layout: 2 Colonnes
+    # Layout: 2 Columns
     col_params, col_metrics = st.columns([1.3, 1], gap="large")
 
     # ==========================================================================
-    # COLONNE GAUCHE : PARAMETRES & SIMULATION
+    # LEFT COLUMN: PARAMETERS & SIMULATION
     # ==========================================================================
     with col_params:
         
@@ -627,14 +587,14 @@ with tab_greeks:
                 st.markdown(f"**Ref Spot:** {S:.2f} €")
                 ref_value = S
             else:
-                # Callback: Si on change le strike fixe, on réaligne la simulation
+                # Callback: Realign simulation if fixed strike is changed
                 def sync_sim_to_strike():
                     val = st.session_state.fix_strike_input
                     st.session_state.sim_spot_val = val
                     st.session_state.gk_slider_spot = val
                     st.session_state.gk_box_spot = val
 
-                # Valeur par défaut robustes pour éviter le warning jaune
+                # Robust default defaults to avoid yellow warnings
                 def_k = float(st.session_state.get('fix_strike_input', S))
                 
                 fixed_strike = st.number_input("Strike (€)", value=def_k, step=1.0, format="%.2f", 
@@ -647,62 +607,60 @@ with tab_greeks:
         # --- 2. MARKET SIMULATION (VARIABLE) ---
         st.markdown("**Market Simulation**")
         
-        # A. Initialisation Robuste (AJOUT DE LA VOLATILITE ICI)
+        # A. Robust Initialization
         if 'sim_spot_val' not in st.session_state: 
             st.session_state.sim_spot_val = float(S)
         
-        # Initialisation Volatilité (Nécessaire car on retire 'value=' plus bas)
+        # Volatility Initialization
         if 'gk_vol_slider' not in st.session_state:
             st.session_state.gk_vol_slider = float(sigma * 100)
 
-        # On s'assure aussi que les clés spécifiques aux widgets existent
+        # Ensure specific widget keys exist
         if 'gk_slider_spot' not in st.session_state:
             st.session_state.gk_slider_spot = st.session_state.sim_spot_val
         if 'gk_box_spot' not in st.session_state:
             st.session_state.gk_box_spot = st.session_state.sim_spot_val
 
-        # B. Callbacks de Synchronisation CROISÉE (Box <-> Slider)
+        # B. CROSS-SYNC Callbacks (Box <-> Slider)
         def update_slider():
             val = st.session_state.gk_slider_spot
             st.session_state.sim_spot_val = val
-            st.session_state.gk_box_spot = val # Force la box
+            st.session_state.gk_box_spot = val # Force box
 
         def update_box():
             val = st.session_state.gk_box_spot
             st.session_state.sim_spot_val = val
-            st.session_state.gk_slider_spot = val # Force le slider
+            st.session_state.gk_slider_spot = val # Force slider
 
-        # C. Définition de la plage
+        # C. Range definition
         max_spot = float(ref_value * 2.0) if ref_value > 0 else 100.0
         
-        # D. Affichage Slider / Box
+        # D. Slider / Box Display
         c_sim1, c_sim2 = st.columns([3, 1])
         with c_sim1:
-            # CORRECTION : Suppression de 'value='. La 'key' suffit.
             st.slider("Spot Range", 0.0, max_spot, key="gk_slider_spot", 
                       on_change=update_slider, label_visibility="collapsed")
         with c_sim2:
             st.number_input("Spot", 0.0, max_spot, key="gk_box_spot", 
                             on_change=update_box, label_visibility="collapsed")
         
-        # E. Variable DYNAMIQUE pour le calcul
+        # E. DYNAMIC Variable for calculation
         dyn_spot = st.session_state.sim_spot_val 
         
-        # Feedback visuel (% move)
+        # Visual feedback (% move)
         pct_move = (dyn_spot / ref_value - 1) * 100 if ref_value > 0 else 0
         st.caption(f"Simulated Spot: **{dyn_spot:.2f} €** ({pct_move:+.2f}%)")
 
-        # F. Volatilité
+        # F. Volatility
         st.write("")
-        # CORRECTION : Suppression de 'value='. La 'key' gère tout.
         st.slider("Volatility (%)", 1.0, 100.0, key="gk_vol_slider")
         
-        # CORRECTION : On lit DIRECTEMENT le State pour être sûr d'avoir la valeur post-Reset
+        # Reading state to ensure correct post-Reset values
         dyn_vol = st.session_state.gk_vol_slider / 100.0
 
         st.divider()
         
-        # G. Boutons Scénarios (Tab 2 Only)
+        # G. Scenario Buttons (Tab 2 Only)
         st.caption("Quick Scenarios")
         b1, b2, b3, b4 = st.columns(4)
         
@@ -711,18 +669,18 @@ with tab_greeks:
         with b3: st.button("Bleed", on_click=set_greeks_scenario, args=("TimeBleed",), use_container_width=True, help="**Time Decay:**\n- Maturity: -1 Month\n- Spot/Vol: Unchanged\n\nIsolates the effect of Theta (Time passing).")
         with b4: st.button("Reset", on_click=set_greeks_scenario, args=("Reset",), use_container_width=True, help="**Reset:**\nReverts all parameters (Spot, Vol, Time) to the initial Market Data values.")
     # ==========================================================================
-    # COLONNE DROITE : METRICS & P&L
+    # RIGHT COLUMN: METRICS & P&L
     # ==========================================================================
     with col_metrics:
         st.markdown("#### Greeks (Bank View)")
         
-        # 1. PRICING AU SPOT DYNAMIQUE (dyn_spot)
+        # 1. PRICING WITH DYNAMIC SPOT (dyn_spot)
         if p_type == "Phoenix":
             prod_gk = PhoenixStructure(
-                S=dyn_spot,       # Spot du Slider
+                S=dyn_spot,       # Slider Spot
                 T=fixed_maturity, 
                 r=r, 
-                sigma=dyn_vol,    # Vol du Slider
+                sigma=dyn_vol,    # Slider Vol
                 q=q,
                 autocall_barrier=st.session_state.autocall_pct,
                 protection_barrier=st.session_state.barrier_pct,
@@ -744,12 +702,12 @@ with tab_greeks:
                 greeks = {k: -v for k, v in c_greeks.items()}
 
         else:
-            # Cas Vanilla
+            # Vanilla Case
             prod_gk = EuropeanOption(S=dyn_spot, K=fixed_strike, T=fixed_maturity, r=r, sigma=dyn_vol, q=q, option_type=p_type)
             cg = prod_gk.greeks()
             greeks = {k: -v for k, v in cg.items()}
 
-        # 2. AFFICHAGE GRECS
+        # 2. GREEKS DISPLAY
         m1, m2 = st.columns(2)
         m1.metric("Delta (Δ)", f"{greeks.get('delta',0):.4f}")
         m1.metric("Gamma (Γ)", f"{greeks.get('gamma',0):.4f}")
@@ -805,7 +763,7 @@ with tab_greeks:
         # 3. P&L DECOMPOSITION
         st.markdown("#### P&L Attribution")
         
-        # Différentiels
+        # Differentials
         d_spot = dyn_spot - ref_value
         d_vol = dyn_vol - sigma
         
@@ -828,17 +786,17 @@ with tab_greeks:
 
         real_pnl = - (prod_gk.price() - prod_ref.price())
 
-        # Si le bouton Reset vient d'être cliqué, on force le nettoyage visuel
+        # If the Reset button has just been clicked, force visual cleanup
         if st.session_state.get('force_pnl_zero', False):
             real_pnl = 0.0
             taylor_pnl = 0.0
             pnl_delta = 0.0
             pnl_gamma = 0.0
             pnl_vega = 0.0
-            # On éteint le drapeau pour que les prochains mouvements recalculent normalement
+            # Turn off the flag so that next movements calculate normally
             st.session_state.force_pnl_zero = False
 
-        # Affichage P&L
+        # P&L Display
         c_pnl1, c_pnl2 = st.columns(2)
         color = "normal" if real_pnl >= 0 else "inverse"
         c_pnl1.metric("ACTUAL P&L", f"{real_pnl:+.2f} €", delta_color=color)
@@ -849,18 +807,18 @@ with tab_greeks:
         cols[1].metric("Gamma P&L", f"{pnl_gamma:+.2f}")
         cols[2].metric("Vega P&L", f"{pnl_vega:+.2f}")
 
-        # ... (Calcul des Greeks et du P&L Attribution fait juste avant) ...
+        # ... (Greeks calculation and P&L Attribution done just before) ...
     
-        # --- LOGIQUE D'EXPLICATION DYNAMIQUE ---
+        # --- DYNAMIC EXPLANATION LOGIC ---
         st.subheader("P&L Attribution Analysis")
     
-        # 1. On détecte le mouvement simulé
-        spot_move = st.session_state.sim_spot_val - S # S = Spot initial
-        vol_move = (st.session_state.gk_vol_slider/100.0) - sigma # sigma = Vol initiale
+        # 1. Detect the simulated movement
+        spot_move = st.session_state.sim_spot_val - S # S = Initial Spot
+        vol_move = (st.session_state.gk_vol_slider/100.0) - sigma # sigma = Initial Vol
     
         explanation = []
     
-        # 2. Analyse par Produit (Vue BANQUE / VENDEUR)
+        # 2. Product Analysis (BANK / SELLER View)
         if p_type == "Call":
             role = "Short Call"
             explanation.append(f"**Position:** You are **{role}** (Bank View). You are Short Delta, Short Gamma, Short Vega, Long Theta.")
@@ -889,7 +847,7 @@ with tab_greeks:
             elif spot_move < 0:
                 explanation.append(f"**Spot (-):** Market went DOWN. Being Long Delta, you **lost money**.")
             
-            # Vega Analysis (Idem Call)
+            # Vega Analysis (Same as Call)
             if vol_move > 0:
                 explanation.append(f"**Vol (+):** Vol rose. Short Vega -> **Loss**.")
             elif vol_move < 0:
@@ -912,21 +870,21 @@ with tab_greeks:
                 explanation.append(f"**Spot (+):** Market rise. The product gets closer to Autocall (paying 100% + Cpn). Its value rises towards Par. You **lose** (or gain less).")
 
         
-        # Affichage propre
+        # Clean display
         st.markdown("\n\n".join(explanation))    
 
     # ==========================================================================
-    # PARTIE 3 : HEATMAPS (RECUPEREE DU CODE PRECEDENT)
+    # PART 3: HEATMAPS 
     # ==========================================================================
     st.divider()
     st.subheader("Risk Heatmaps (Scenario Analysis)")
     
-    # Contrôles spécifiques aux Heatmaps
+    # Heatmap specific controls
     hm_c1, hm_c2, hm_c3 = st.columns(3)
     with hm_c1: 
         hm_spot_rng = st.slider("Matrix Spot Range (%)", 5, 50, 15, 5) / 100
     with hm_c2: 
-        # Slider Vol SANS KEY ou avec key unique pour éviter le conflit
+        # Vol Slider WITHOUT KEY or with unique key to avoid conflicts
         hm_vol_rng = st.slider("Matrix Vol Range (pts)", 5, 50, 10, 5) / 100
     with hm_c3:
         hm_mode = st.radio("View Mode", ["2D Matrix", "3D Surface"], horizontal=True)
@@ -969,10 +927,9 @@ with tab_greeks:
     st.subheader("Structural Analysis: Greeks vs Spot")
 
     if p_type in ["Call", "Put"]:
-        # Plus de slider ici, c'est automatique (0 à 200% du Strike)
         with st.spinner("Computing Greeks Profile..."):
-            # L'objet prod_gk contient déjà le dyn_spot (le point rouge) 
-            # et le fixed_strike (la ligne pointillée)
+            # prod_gk object already contains dyn_spot (red point) 
+            # and fixed_strike (dotted line)
             fig_structure = prod_gk.plot_greeks_profile()
             st.plotly_chart(fig_structure, use_container_width=True)
             
