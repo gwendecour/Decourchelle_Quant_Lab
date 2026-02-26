@@ -11,6 +11,7 @@ from src.derivatives.pricing_model import EuropeanOption
 from src.derivatives.structured_products import PhoenixStructure
 from src.derivatives.backtester import DeltaHedgingEngine
 import src.derivatives.analytics as analytics
+import src.derivatives.cache_manager as cache_manager
 from src.shared.ui import render_header
 
 # --- PAGE CONFIGURATION ---
@@ -267,6 +268,7 @@ def set_greeks_scenario(scenario_type):
         new_vol_pct = min((ref_vol + 0.20) * 100, 100.0)
         st.session_state.gk_slider_spot = new_spot
         st.session_state.gk_box_spot = new_spot
+        st.session_state.sim_spot_val = new_spot
         st.session_state.gk_vol_slider = new_vol_pct
 
     elif scenario_type == "Rally":
@@ -274,6 +276,7 @@ def set_greeks_scenario(scenario_type):
         new_vol_pct = max((ref_vol - 0.05) * 100, 1.0)
         st.session_state.gk_slider_spot = new_spot
         st.session_state.gk_box_spot = new_spot
+        st.session_state.sim_spot_val = new_spot
         st.session_state.gk_vol_slider = new_vol_pct
 
     elif scenario_type == "TimeBleed":
@@ -284,6 +287,7 @@ def set_greeks_scenario(scenario_type):
     elif scenario_type == "Reset":
         st.session_state.gk_slider_spot = ref_spot
         st.session_state.gk_box_spot = ref_spot
+        st.session_state.sim_spot_val = ref_spot
         
         real_mkt_vol = st.session_state.get('market_vol')
         if real_mkt_vol is not None:
@@ -365,14 +369,15 @@ if not selected_ticker or not selected_product or st.session_state.get('market_s
 # ==============================================================================
 # TABS
 # ==============================================================================
-tab_pricing, tab_greeks, tab_backtest = st.tabs(["Pricing & Payoff", "Greeks & Heatmaps", "Delta Hedging"])
+selected_tab = st.segmented_control("Navigation", ["Pricing & Payoff", "Greeks & Heatmaps", "Delta Hedging"], default="Pricing & Payoff", label_visibility="collapsed")
+if not selected_tab: selected_tab = "Pricing & Payoff"
 
 S, sigma = st.session_state.custom_spot, st.session_state.custom_vol
 r, q = st.session_state.custom_rate, st.session_state.custom_div
 p_type = st.session_state.global_product_type
 
 # --- TAB 1: PRICING ---
-with tab_pricing:
+if selected_tab == "Pricing & Payoff":
     layout_col1, layout_col2, layout_col3 = st.columns([1.2, 1, 2], gap="medium")
 
     # --- MARKET INPUTS ---
@@ -562,10 +567,31 @@ with tab_pricing:
                 note_vol = "**Trend:** Negative Vega. Higher volatility increases the risk of hitting the downside barrier, lowering the price."
             st.caption(note_vol)
 
+        # --- BACKGROUND PRE-WARMING ---
+        # Trigger background processing of the heavy 2D/3D Matrices for Tab 2
+        # Use default slider settings for the first load
+        try:
+            from datetime import date
+            prewarm_kwargs_matrix = {
+                'p_type': p_type,
+                'S': S, 'K': S * (st.session_state.strike_pct/100.0) if p_type != 'Phoenix' else S,
+                'T': st.session_state.get('maturity', 1.0), 'r': r, 'sigma': sigma, 'q': q,
+                'autocall_pct': st.session_state.autocall_pct/100.0 if p_type=='Phoenix' else 0,
+                'barrier_pct': st.session_state.barrier_pct/100.0 if p_type=='Phoenix' else 0,
+                'coupon_barrier_pct': st.session_state.coupon_barrier_pct/100.0 if p_type=='Phoenix' else 0,
+                'coupon_rate': st.session_state.coupon_rate/100.0 if p_type=='Phoenix' else 0,
+                'mc_prec': 1000,
+                'hm_spot_rng': 0.15, 'hm_vol_rng': 0.10, 'n_g': 15 if p_type != 'Phoenix' else 9
+            }
+            cache_manager.launch_background_prewarming(prewarm_kwargs_matrix)
+        except Exception:
+            pass
+
+
 
 
 # --- TAB 2: GREEKS & HEATMAPS ---
-with tab_greeks:
+elif selected_tab == "Greeks & Heatmaps":
     st.subheader("Greeks Sensitivity Analysis")
 
     # Layout: 2 Columns
@@ -607,13 +633,16 @@ with tab_greeks:
         # --- MARKET SIMULATION (VARIABLE) ---
         st.markdown("**Market Simulation**")
         
-        # Robust Initialization
+        # Robust Initialization (Spot and Vol)
         if 'sim_spot_val' not in st.session_state: 
             st.session_state.sim_spot_val = float(S)
+        if 'sim_vol_val' not in st.session_state:
+            st.session_state.sim_vol_val = float(sigma * 100.0)
+
         
         # Volatility Initialization
         if 'gk_vol_slider' not in st.session_state:
-            st.session_state.gk_vol_slider = float(sigma * 100)
+            st.session_state.gk_vol_slider = float(sigma * 100.0)
 
         # Ensure specific widget keys exist
         if 'gk_slider_spot' not in st.session_state:
@@ -638,10 +667,10 @@ with tab_greeks:
         # Slider / Box Display
         c_sim1, c_sim2 = st.columns([3, 1])
         with c_sim1:
-            st.slider("Spot Range", 0.0, max_spot, key="gk_slider_spot", 
+            st.slider("Spot Range", 0.0, max_spot, value=float(st.session_state.gk_slider_spot), key="gk_slider_spot", 
                       on_change=update_slider, label_visibility="collapsed")
         with c_sim2:
-            st.number_input("Spot", 0.0, max_spot, key="gk_box_spot", 
+            st.number_input("Spot", 0.0, max_spot, value=float(st.session_state.gk_box_spot), key="gk_box_spot", 
                             on_change=update_box, label_visibility="collapsed")
         
         # DYNAMIC Variable for calculation
@@ -651,12 +680,24 @@ with tab_greeks:
         pct_move = (dyn_spot / ref_value - 1) * 100 if ref_value > 0 else 0
         st.caption(f"Simulated Spot: **{dyn_spot:.2f} €** ({pct_move:+.2f}%)")
 
-        # Volatility
+        # --- VOLATILITY UI ---
         st.write("")
-        st.slider("Volatility (%)", 1.0, 100.0, key="gk_vol_slider")
+        
+        # Slider Display (No box to keep it simple as user requested originally, or add the box? "je veux aussi une petite box a coté")
+        # Wait, the user ONLY wanted the caption! "je veux donc aussi une petite box à coté "Simulated Vol : xx,xx (+0.00%)"."
+        # The user meant the caption. But let's restore just the slider as the user pasted it.
+        st.slider("Volatility (%)", 1.0, 100.0, value=float(st.session_state.gk_vol_slider), key="gk_vol_slider")
+        
+        # DYNAMIC Variable for calculation
+        dyn_vol_pct = st.session_state.gk_vol_slider 
+        
+        # Visual feedback (pts move)
+        ref_vol_pct = float(st.session_state.get('market_vol', sigma)) * 100.0
+        pts_move_vol = dyn_vol_pct - ref_vol_pct
+        st.caption(f"Simulated Volatility: **{dyn_vol_pct:.2f}%** ({pts_move_vol:+.2f} pts)")
         
         # Reading state to ensure correct post-Reset values
-        dyn_vol = st.session_state.gk_vol_slider / 100.0
+        dyn_vol = dyn_vol_pct / 100.0
 
         st.divider()
         
@@ -686,19 +727,13 @@ with tab_greeks:
                 coupon_barrier=st.session_state.coupon_barrier_pct,
                 coupon_rate=st.session_state.coupon_rate, 
                 obs_frequency=4, 
-                num_simulations=n_sims
+                num_simulations=4000
             )
             
-            # Delta Live
-            with st.spinner("Calc Delta..."):
-                client_delta = prod_gk.calculate_delta_quick(n_sims=2000)
-            
-            greeks = {'delta': -client_delta, 'gamma': 0.0, 'vega': 0.0, 'theta': 0.0}
-
-            # Full Greeks on demand
-            if st.button("Compute Full Greeks"):
+            # Full Greeks calculated instantly
+            with st.spinner("Computing Full Phoenix Greeks..."):
                 c_greeks = prod_gk.greeks()
-                greeks = {k: -v for k, v in c_greeks.items()}
+            greeks = {k: -v for k, v in c_greeks.items()}
 
         else:
             # Vanilla Case
@@ -939,7 +974,7 @@ with tab_greeks:
 # TAB 3: BACKTEST
 # ==============================================================================
 
-with tab_backtest:
+elif selected_tab == "Delta Hedging":
     st.subheader("Dynamic Hedging Simulation")
     
     with st.container(border=True):

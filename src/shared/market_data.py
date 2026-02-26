@@ -1,3 +1,4 @@
+import streamlit as st
 import yfinance as yf
 import numpy as np
 import pandas as pd
@@ -5,6 +6,7 @@ import pandas as pd
 class MarketData:
     
     @staticmethod
+    @st.cache_data(ttl=3600, show_spinner=False)
     def get_spot(ticker):
         try:
             stock = yf.Ticker(ticker)
@@ -27,6 +29,7 @@ class MarketData:
             return None
 
     @staticmethod
+    @st.cache_data(ttl=3600, show_spinner=False)
     def get_volatility(ticker, window="1y"):
         """
         Calculates annualized historical volatility (Close-to-Close).
@@ -53,6 +56,7 @@ class MarketData:
             return 0.20
 
     @staticmethod
+    @st.cache_data(ttl=3600, show_spinner=False)
     def get_dividend_yield(ticker):
         """
         Retrieves the dividend yield and standardizes the scale (e.g., 2.46 -> 0.0246).
@@ -73,6 +77,7 @@ class MarketData:
             return 0.0
         
     @staticmethod
+    @st.cache_data(ttl=3600, show_spinner=False)
     def get_risk_free_rate(ticker="^TNX"):
         """
         Retrieves the risk-free rate via the CBOE 10-Year Treasury Note Yield (^TNX).
@@ -91,6 +96,7 @@ class MarketData:
             return 0.03
     
     @staticmethod
+    @st.cache_data(ttl=3600, show_spinner=False)
     def get_historical_data(ticker, start_date, end_date):
         try:
             stock = yf.Ticker(ticker)
@@ -105,6 +111,7 @@ class MarketData:
             return None
 
     @staticmethod
+    @st.cache_data(ttl=3600, show_spinner=False)
     def get_clean_multiticker_data(tickers, start_date, end_date):
         """
         Downloads, cleans, and calculates a data quality score for multiple tickers.
