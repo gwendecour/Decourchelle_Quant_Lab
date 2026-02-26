@@ -36,7 +36,7 @@ st.markdown("""
 render_header()
 
 # ==============================================================================
-# 1. STATE & UTILS
+# STATE & UTILS
 # ==============================================================================
 defaults = {
     'custom_spot': 100.0, 'custom_vol': 0.20, 'custom_rate': 0.04, 'custom_div': 0.00,
@@ -211,7 +211,7 @@ def set_pricing_scenario(scenario_type):
     1. Always retrieve the original market data (Reference).
     2. Apply scenarios directly to the reference to avoid accumulation of modifications.
     """
-    # 1. Data Retrieval
+    # Data Retrieval
     ref_spot = st.session_state.get('market_spot')
     ref_vol = st.session_state.get('market_vol')
     ref_rate = st.session_state.get('market_rate')
@@ -225,7 +225,7 @@ def set_pricing_scenario(scenario_type):
     
     current_mat = st.session_state.get('maturity', 1.0) 
 
-    # 2. Apply Scenario
+    # Apply Scenario
     p_type = st.session_state.global_product_type
     
     # --- STRUCTURE SCENARIOS ---
@@ -293,7 +293,7 @@ def set_greeks_scenario(scenario_type):
         st.session_state.force_pnl_zero = True
 
 # ==============================================================================
-# 2. HEADER
+# HEADER
 # ==============================================================================
 TICKERS = {
     "GLE.PA": "SocGen (Bank)",
@@ -362,7 +362,7 @@ if not selected_ticker or not selected_product or st.session_state.get('market_s
     st.stop()
 
 # ==============================================================================
-# 3. TABS
+# TABS
 # ==============================================================================
 tab_pricing, tab_greeks, tab_backtest = st.tabs(["Pricing & Payoff", "Greeks & Heatmaps", "Delta Hedging"])
 
@@ -468,11 +468,11 @@ with tab_pricing:
         Since Phoenix Autocalls are **Path-Dependent** structures (the outcome depends on the daily/monthly history of the spot, not just the final value), closed-form formulas (like Black-Scholes) cannot be used directly.
         
         **Algorithm Steps:**
-        1.  **Diffusion:** We simulate **2,000 to 10,000 paths** of the underlying asset using Geometric Brownian Motion (GBM).
+        *   **Diffusion:** We simulate **2,000 to 10,000 paths** of the underlying asset using Geometric Brownian Motion (GBM).
             * $dS_t = r S_t dt + \sigma S_t dW_t$
-        2.  **Observation:** For each path, we check the barriers (Coupon, Protection, Autocall) at every observation date.
-        3.  **Payoff Calculation:** We determine the cash flows for each specific path (Coupons paid, early redemption, or final payout).
-        4.  **Discounting:** We discount the average payoff back to present value using the risk-free rate $r$.
+        *   **Observation:** For each path, we check the barriers (Coupon, Protection, Autocall) at every observation date.
+        *   **Payoff Calculation:** We determine the cash flows for each specific path (Coupons paid, early redemption, or final payout).
+        *   **Discounting:** We discount the average payoff back to present value using the risk-free rate $r$.
             * $Price = e^{-rT} \cdot \mathbb{E}^{\mathbb{Q}}[\text{Payoff}]$
         """)
             else:
@@ -570,12 +570,11 @@ with tab_greeks:
     # Layout: 2 Columns
     col_params, col_metrics = st.columns([1.3, 1], gap="large")
 
-    # ==========================================================================
     # LEFT COLUMN: PARAMETERS & SIMULATION
-    # ==========================================================================
+    
     with col_params:
         
-        # --- 1. CONTRACT SETUP (FIXED) ---
+        # --- CONTRACT SETUP (FIXED) ---
         st.markdown("**Contract Setup (Fixed)**")
         
         c_def1, c_def2 = st.columns(2)
@@ -604,10 +603,10 @@ with tab_greeks:
 
         st.divider()
 
-        # --- 2. MARKET SIMULATION (VARIABLE) ---
+        # --- MARKET SIMULATION (VARIABLE) ---
         st.markdown("**Market Simulation**")
         
-        # A. Robust Initialization
+        # Robust Initialization
         if 'sim_spot_val' not in st.session_state: 
             st.session_state.sim_spot_val = float(S)
         
@@ -621,7 +620,7 @@ with tab_greeks:
         if 'gk_box_spot' not in st.session_state:
             st.session_state.gk_box_spot = st.session_state.sim_spot_val
 
-        # B. CROSS-SYNC Callbacks (Box <-> Slider)
+        # CROSS-SYNC Callbacks (Box <-> Slider)
         def update_slider():
             val = st.session_state.gk_slider_spot
             st.session_state.sim_spot_val = val
@@ -632,10 +631,10 @@ with tab_greeks:
             st.session_state.sim_spot_val = val
             st.session_state.gk_slider_spot = val # Force slider
 
-        # C. Range definition
+        # Range definition
         max_spot = float(ref_value * 2.0) if ref_value > 0 else 100.0
         
-        # D. Slider / Box Display
+        # Slider / Box Display
         c_sim1, c_sim2 = st.columns([3, 1])
         with c_sim1:
             st.slider("Spot Range", 0.0, max_spot, key="gk_slider_spot", 
@@ -644,14 +643,14 @@ with tab_greeks:
             st.number_input("Spot", 0.0, max_spot, key="gk_box_spot", 
                             on_change=update_box, label_visibility="collapsed")
         
-        # E. DYNAMIC Variable for calculation
+        # DYNAMIC Variable for calculation
         dyn_spot = st.session_state.sim_spot_val 
         
         # Visual feedback (% move)
         pct_move = (dyn_spot / ref_value - 1) * 100 if ref_value > 0 else 0
         st.caption(f"Simulated Spot: **{dyn_spot:.2f} €** ({pct_move:+.2f}%)")
 
-        # F. Volatility
+        # Volatility
         st.write("")
         st.slider("Volatility (%)", 1.0, 100.0, key="gk_vol_slider")
         
@@ -660,7 +659,7 @@ with tab_greeks:
 
         st.divider()
         
-        # G. Scenario Buttons (Tab 2 Only)
+        # Scenario Buttons (Tab 2 Only)
         st.caption("Quick Scenarios")
         b1, b2, b3, b4 = st.columns(4)
         
@@ -668,13 +667,12 @@ with tab_greeks:
         with b2: st.button("Rally", on_click=set_greeks_scenario, args=("Rally",), use_container_width=True, help="**Bull Rally:**\n- Spot: +10%\n- Volatility: -5 pts (Calm)\n\nSimulates a steady market rise.")
         with b3: st.button("Bleed", on_click=set_greeks_scenario, args=("TimeBleed",), use_container_width=True, help="**Time Decay:**\n- Maturity: -1 Month\n- Spot/Vol: Unchanged\n\nIsolates the effect of Theta (Time passing).")
         with b4: st.button("Reset", on_click=set_greeks_scenario, args=("Reset",), use_container_width=True, help="**Reset:**\nReverts all parameters (Spot, Vol, Time) to the initial Market Data values.")
-    # ==========================================================================
+    
     # RIGHT COLUMN: METRICS & P&L
-    # ==========================================================================
     with col_metrics:
         st.markdown("#### Greeks (Bank View)")
         
-        # 1. PRICING WITH DYNAMIC SPOT (dyn_spot)
+        # PRICING WITH DYNAMIC SPOT (dyn_spot)
         if p_type == "Phoenix":
             prod_gk = PhoenixStructure(
                 S=dyn_spot,       # Slider Spot
@@ -707,7 +705,7 @@ with tab_greeks:
             cg = prod_gk.greeks()
             greeks = {k: -v for k, v in cg.items()}
 
-        # 2. GREEKS DISPLAY
+        # GREEKS DISPLAY
         m1, m2 = st.columns(2)
         m1.metric("Delta (Δ)", f"{greeks.get('delta',0):.4f}")
         m1.metric("Gamma (Γ)", f"{greeks.get('gamma',0):.4f}")
@@ -760,7 +758,7 @@ with tab_greeks:
 
         st.divider()
 
-        # 3. P&L DECOMPOSITION
+        # P&L DECOMPOSITION
         st.markdown("#### P&L Attribution")
         
         # Differentials
@@ -812,13 +810,13 @@ with tab_greeks:
         # --- DYNAMIC EXPLANATION LOGIC ---
         st.subheader("P&L Attribution Analysis")
     
-        # 1. Detect the simulated movement
+        # Detect the simulated movement
         spot_move = st.session_state.sim_spot_val - S # S = Initial Spot
         vol_move = (st.session_state.gk_vol_slider/100.0) - sigma # sigma = Initial Vol
     
         explanation = []
     
-        # 2. Product Analysis (BANK / SELLER View)
+        # Product Analysis (BANK / SELLER View)
         if p_type == "Call":
             role = "Short Call"
             explanation.append(f"**Position:** You are **{role}** (Bank View). You are Short Delta, Short Gamma, Short Vega, Long Theta.")
@@ -944,9 +942,8 @@ with tab_backtest:
     st.subheader("Dynamic Hedging Simulation")
     
     with st.container(border=True):
-        # ----------------------------------------------------------------------
-        # A. PRODUCT CONFIGURATION
-        # ----------------------------------------------------------------------
+        
+        # PRODUCT CONFIGURATION
         st.markdown(f"#### {p_type} Configuration")
         
         # Init variables
@@ -981,9 +978,7 @@ with tab_backtest:
             with vanilla_c2:
                 bt_maturity = st.number_input("Maturity (Years)", value=1.0, step=0.25, min_value=0.1, key="bt_mat_vanilla")
 
-        # ----------------------------------------------------------------------
-        # B. MARKET & SIMULATION SETTINGS
-        # ----------------------------------------------------------------------
+        # MARKET & SIMULATION SETTINGS
         st.markdown("#### Market & Execution Settings")
         
         sim_c1, sim_c2, sim_c3 = st.columns(3)
@@ -1022,7 +1017,7 @@ with tab_backtest:
         
         with st.spinner("1/3 Calibrating Historical Volatility..."):
             try:
-                # --- 1. CALIBRATION ---
+                # --- CALIBRATION ---
                 md_calib = MarketData()
                 df_calib = md_calib.get_historical_data(st.session_state.ticker_input, lookback_start.strftime("%Y-%m-%d"), start_d.strftime("%Y-%m-%d"))
                 
@@ -1032,7 +1027,7 @@ with tab_backtest:
                     sold_vol = log_rets.std() * np.sqrt(252)
                     st.toast(f"Calibration Done: Sold Volatility = {sold_vol:.2%}")
                 
-                # --- 2. BACKTEST DATA ---
+                # --- BACKTEST DATA ---
                 md_bt = MarketData()
                 hist_data = md_bt.get_historical_data(st.session_state.ticker_input, start_d.strftime("%Y-%m-%d"), end_d.strftime("%Y-%m-%d"))
                 
@@ -1041,7 +1036,7 @@ with tab_backtest:
                 else:
                     init_spot = hist_data['Close'].iloc[0]
                     
-                    # --- 3. INSTANTIATION ---
+                    # --- INSTANTIATION ---
                     if p_type == "Phoenix":
                         opt_hedge = PhoenixStructure(
                             S=init_spot, 
@@ -1069,7 +1064,7 @@ with tab_backtest:
                             option_type="Call" if is_call else "Put"
                         )
 
-                    # --- 4. ENGINE EXECUTION ---
+                    # --- ENGINE EXECUTION ---
                     hedging_engine = DeltaHedgingEngine(
                         option=opt_hedge, 
                         market_data=hist_data,
@@ -1081,14 +1076,14 @@ with tab_backtest:
 
                     res, met = hedging_engine.run_backtest()
 
-                    # --- 5. POST-ANALYSIS & ACCOUNTING ---
+                    # --- POST-ANALYSIS & ACCOUNTING ---
                     
                     final_date_str = met['Final Date']
                     duration = met['Duration (Months)']
                     status = met['Status']
                     final_S = met['Final Spot']
                     
-                    # A. Product Status
+                    # Product Status
                     if p_type == "Phoenix":
                         coupons = met['Coupons Paid']
                         st.markdown(f"Status: Product {status} on {final_date_str} "
@@ -1111,7 +1106,7 @@ with tab_backtest:
                                 f"Final Spot: {final_S:.2f} vs Strike: {strike_val:.2f} ({condition}). "
                                 f"Bank Liability: {payout_msg}")
 
-                    # B. Financials Breakdown
+                    # Financials Breakdown
                     premium = met['Option Premium']
                     costs = met['Total Transaction Costs']
                     
@@ -1130,7 +1125,7 @@ with tab_backtest:
                         # Trading P&L = Engine Result - Premium + Costs
                         trading_result = met['Engine P&L'] - premium + costs
 
-                    # --- 6. KPI DISPLAY ---
+                    # --- KPI DISPLAY ---
                     st.subheader("Performance Breakdown")
                     
                     # Volatility Spread Logic
@@ -1193,8 +1188,8 @@ with tab_backtest:
 
                         **Net P&L Calculation**
                         * The final result combines two distinct components:
-                            1.  **Fixed Flows:** Premium received - Final Payout (Liability).
-                            2.  **Trading Flows:** The cumulative result of the hedging process - Transaction Costs.
+                            * **Fixed Flows:** Premium received - Final Payout (Liability).
+                            * **Trading Flows:** The cumulative result of the hedging process - Transaction Costs.
                         """)
                         
                     t1, t2 = st.tabs(["Analysis Dashboard", "Delta History"])

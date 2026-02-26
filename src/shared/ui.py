@@ -4,7 +4,7 @@ def render_header():
     """
     Affiche une barre de navigation horizontale et cache la sidebar native.
     """
-    # 1. CSS POUR CACHER LA SIDEBAR ET STYLISER LE HEADER
+    # CSS POUR CACHER LA SIDEBAR ET STYLISER LE HEADER
     st.markdown("""
         <style>
             /* Cacher complètement le 'rideau' (sidebar) et le bouton pour l'ouvrir */
@@ -31,7 +31,7 @@ def render_header():
         </style>
     """, unsafe_allow_html=True)
 
-    # 2. BARRE DE NAVIGATION HORIZONTALE
+    # BARRE DE NAVIGATION HORIZONTALE
     # On utilise des colonnes pour aligner gauche (Logo/Home) et droite (CV)
     col1, col2 = st.columns([5, 1])
     
