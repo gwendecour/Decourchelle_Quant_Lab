@@ -2,16 +2,16 @@ import streamlit as st
 
 def render_header():
     """
-    Affiche une barre de navigation horizontale et cache la sidebar native.
+    Renders a horizontal navigation bar and hides the native sidebar.
     """
-    # CSS POUR CACHER LA SIDEBAR ET STYLISER LE HEADER
+    # CSS TO HIDE THE SIDEBAR AND STYLE THE HEADER
     st.markdown("""
         <style>
-            /* Cacher complètement le 'rideau' (sidebar) et le bouton pour l'ouvrir */
+            /* Completely hide the sidebar and its toggle button */
             [data-testid="stSidebar"] {display: none;}
             [data-testid="collapsedControl"] {display: none;}
             
-            /* Style de la barre de navigation */
+            /* Navigation bar styling */
             .nav-container {
                 display: flex;
                 justify_content: space-between;
@@ -31,16 +31,16 @@ def render_header():
         </style>
     """, unsafe_allow_html=True)
 
-    # BARRE DE NAVIGATION HORIZONTALE
-    # On utilise des colonnes pour aligner gauche (Logo/Home) et droite (CV)
+    # HORIZONTAL NAVIGATION BAR
+    # Using columns to align left (Logo/Home) and right (Resume)
     col1, col2 = st.columns([5, 1])
     
     with col1:
-        # Lien retour maison (simulé par un bouton lien ou text)
+        # Home Page link
         st.page_link("Home.py", label="Home Page")
         
     with col2:
-        # Lien vers le CV
+        # Resume link
         st.page_link("pages/04_Resume_&_Story.py", label="My Resume & Story")
 
     st.divider()

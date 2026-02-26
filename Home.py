@@ -1,7 +1,7 @@
 import streamlit as st
 from src.shared.ui import render_header
 
-# --- CONFIGURATION DE LA PAGE ---
+# --- PAGE CONFIGURATION ---
 st.set_page_config(
     page_title="Home",
     page_icon="",
@@ -9,57 +9,57 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# --- IMPORT DU HEADER ---
+# --- HEADER IMPORT ---
 render_header()
 
-# --- CSS PERSONNALISÉ (POLICE & BOUTONS DUAL STYLE) ---
+# --- CUSTOM CSS (FONT & DUAL STYLE BUTTONS) ---
 st.markdown("""
 <style>
-    /* Import de la police 'Lora' (Style académique/finance) */
+    /* Import 'Lora' font (Academic/Finance style) */
     @import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;600&display=swap');
 
-    /* Appliquer la police aux titres */
+    /* Apply font to headers */
     h1, h2, h3, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3 {
         font-family: 'Lora', serif !important;
         color: #1a1a1a;
     }
     
-    /* Appliquer une police propre au texte */
+    /* Apply clean font to text */
     p, .stMarkdown, .stText {
         font-family: 'Inter', sans-serif !important;
         color: #4a4a4a;
         line-height: 1.6;
     }
 
-    /* --- STYLE DES BOUTONS --- */
+    /* --- BUTTON STYLES --- */
     
-    /* 1. Boutons "EXPLORE" (Type Primary) -> VERT FINANCE + TEXTE BLANC */
+    /* 1. "EXPLORE" Buttons (Primary Type) -> FINANCE GREEN + WHITE TEXT */
     div.stButton > button[kind="primary"],
     div.stButton > button[kind="primary"] * {
         background-color: #2e7d32 !important; 
-        color: #ffffff !important;            /* FORCE BLANC PARTOUT */
-        fill: #ffffff !important;             /* FORCE BLANC POUR LES ICONES SI PRÉSENTES */
+        color: #ffffff !important;            /* FORCE WHITE GLOBALLY */
+        fill: #ffffff !important;             /* FORCE WHITE FOR ICONS IF PRESENT */
         border: none !important;
     }
 
-    /* Gestion du Hover (Survol) */
+    /* Hover State Management */
     div.stButton > button[kind="primary"]:hover,
     div.stButton > button[kind="primary"]:hover * {
         background-color: #1b5e20 !important;
         color: #ffffff !important;
     }
     
-    /* Force la couleur blanche même si le bouton est actif/cliqué */
+    /* Force white color even if button is active/clicked */
     div.stButton > button[kind="primary"]:active, 
     div.stButton > button[kind="primary"]:focus {
         color: #ffffff !important;
         background-color: #1b5e20 !important;
     }
 
-    /* 2. Boutons "METHODOLOGY" (Type Secondary/Défaut) -> GRIS CLAIR */
+    /* 2. "METHODOLOGY" Buttons (Secondary/Default Type) -> LIGHT GREY */
     div.stButton > button[kind="secondary"] {
-        background-color: #f0f2f6 !important; /* Gris clair */
-        color: #31333F !important;            /* Noir/Gris foncé */
+        background-color: #f0f2f6 !important; /* Light Grey */
+        color: #31333F !important;            /* Black/Dark Grey */
         border: 1px solid #d0d0d0 !important;
         font-weight: 500 !important;
         border-radius: 6px;
@@ -71,7 +71,7 @@ st.markdown("""
         color: black !important;
     }
     
-    /* Style des cartes (Containers) */
+    /* Card Styles (Containers) */
     [data-testid="stVerticalBlock"] > [style*="flex-direction: column;"] > [data-testid="stVerticalBlock"] {
         background-color: white;
         padding-bottom: 10px;
@@ -80,7 +80,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==============================================================================
-# CONTENU DES MODALES (METHODOLOGY)
+# MODAL CONTENT (METHODOLOGY)
 # ==============================================================================
 
 story_p1 = r"""
@@ -188,7 +188,7 @@ Evaluation using **Frobenius Norm** (distance to Ground Truth) and impact on **M
 """
 
 # ==============================================================================
-# FONCTION DE DIALOGUE (POP-UP)
+# DIALOG FUNCTION (POP-UP)
 # ==============================================================================
 @st.dialog("Methodology & Backstory")
 def show_methodology(title, content):
@@ -201,10 +201,10 @@ def show_methodology(title, content):
 # PAGE LAYOUT
 # ==============================================================================
 
-# --- TITRE PRINCIPAL ---
+# --- MAIN TITLE ---
 st.markdown("<h1 style='text-align: center; margin-bottom: 10px;'>Choose Your Project</h1>", unsafe_allow_html=True)
 
-# --- NOUVELLE TAGLINE (Sous-titre plus percutant) ---
+# --- DYNAMIC SUBTITLE ---
 st.markdown(
     "<p style='text-align: center; margin-bottom: 50px; color: gray; font-size: 1.1rem;'>"
     "Bridging quantitative theory with industrial implementation through interactive research modules."
@@ -212,13 +212,13 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# --- GRILLE DES PROJETS ---
+# --- PROJECT GRID ---
 col1, col2, col3 = st.columns(3, gap="medium")
 
-# --- CARTE 1 : PRICING ---
+# --- CARD 1 : PRICING ---
 with col1:
     with st.container(border=True):
-        # TITRE CENTRÉ VIA HTML
+        # CENTERED TITLE VIA HTML
         st.markdown("<h3 style='text-align: center;'>Derivatives Pricing</h3>", unsafe_allow_html=True)
         
         st.markdown("""
@@ -228,7 +228,7 @@ with col1:
         </div>
         """, unsafe_allow_html=True)
         
-        # BOUTONS ALIGNÉS COTE A COTE
+        # SIDE-BY-SIDE BUTTONS
         b_col1, b_col2 = st.columns(2)
         with b_col1:
             if st.button("Explore", key="btn_pricing", type="primary", use_container_width=True):
@@ -237,7 +237,7 @@ with col1:
             if st.button("Methodology", key="story_p1", use_container_width=True):
                 show_methodology("Pricing & Hedging Derivatives", story_p1)
 
-# --- CARTE 2 : ALPHATREND ---
+# --- CARD 2 : ALPHATREND ---
 with col2:
     with st.container(border=True):
         st.markdown("<h3 style='text-align: center;'>AlphaTrend Strategy</h3>", unsafe_allow_html=True)
@@ -251,14 +251,14 @@ with col2:
         
         b_col1, b_col2 = st.columns(2)
         with b_col1:
-            # Bouton visuellement "Primary" (Vert) mais logique WIP
+            # Visually "Primary" Button (Green)
             if st.button("Explore", key="btn_invest", type="primary", use_container_width=True):
                 st.switch_page("pages/02_AlphaTrend_Strategy.py")
         with b_col2:
             if st.button("Methodology", key="story_p2", use_container_width=True):
                 show_methodology("AlphaTrend: Beta Neutral", story_p2)
 
-# --- CARTE 3 : ROBUST COVARIANCE ---
+# --- CARD 3 : ROBUST COVARIANCE ---
 with col3:
     with st.container(border=True):
         st.markdown("<h3 style='text-align: center;'>Robust Covariance</h3>", unsafe_allow_html=True)
@@ -272,7 +272,7 @@ with col3:
         
         b_col1, b_col2 = st.columns(2)
         with b_col1:
-            # Bouton visuellement "Primary" (Vert) mais logique WIP
+            # Visually "Primary" Button (Green)
             if st.button("Explore", key="btn_vol", type="primary", use_container_width=True):
                 st.toast("🚧 Work in Progress! Please check the Methodology for details.", icon="⚠️")
         with b_col2:
