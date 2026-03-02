@@ -1,4 +1,5 @@
 import streamlit as st
+import os
 
 def render_header():
     """
@@ -36,8 +37,13 @@ def render_header():
     col1, col2 = st.columns([5, 1])
     
     with col1:
-        # Home Page link
-        st.page_link("Home.py", label="Home Page")
+        # Logo and Home Page link
+        c_logo, c_text = st.columns([1, 15], vertical_alignment="center")
+        with c_logo:
+            if os.path.exists("assets/logo.png"):
+                st.image("assets/logo.png", width=40)
+        with c_text:
+            st.page_link("Home.py", label="Home Page")
         
     with col2:
         # Resume link

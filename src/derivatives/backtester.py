@@ -124,7 +124,14 @@ class DeltaHedgingEngine:
                     if s_curr >= prot_lvl: engine_payoff += nominal
                     else: engine_payoff += nominal * (s_curr / s0)
                 else:
-                    engine_payoff = 0.0 
+                    opt_type = getattr(self.option, 'option_type', 'call').lower()
+                    k_val = getattr(self.option, 'K', s0)
+                    if opt_type == 'call':
+                        engine_payoff = max(s_curr - k_val, 0.0)
+                    elif opt_type == 'put':
+                        engine_payoff = max(k_val - s_curr, 0.0)
+                    else:
+                        engine_payoff = 0.0 
 
                 total_payouts_paid += engine_payoff
 

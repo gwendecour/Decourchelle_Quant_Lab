@@ -15,7 +15,7 @@ import src.derivatives.cache_manager as cache_manager
 from src.shared.ui import render_header
 
 # --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="Pricing Engine", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Pricing Engine", page_icon="assets/logo.png", layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""
     <style>
@@ -36,6 +36,18 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 render_header()
+
+st.title("Derivatives Pricing & Risk Management")
+with st.expander("Pourquoi ce projet ?"):
+    st.markdown("""
+    ### Building a Complete Front-to-Back Derivatives Engine
+    In investment banking, pricing and hedging exotic derivatives (like Phoenix Autocalls) requires robust numerical methods and infrastructure. Standard models like Black-Scholes are powerful for Vanilla options, but fail for path-dependent structured products.
+
+    **The objective?** To build a fully autonomous pricing engine capable of:
+    1. Fetching real-time market data (Spot, Volatility Surface, Dividends).
+    2. Pricing complex path-dependent payoffs using heavy Monte-Carlo simulations.
+    3. Computing the Greeks (Delta, Gamma, Vega) via finite differences to manage the bank's risk book dynamically over time.
+    """)
 
 # ==============================================================================
 # STATE & UTILS
@@ -1073,10 +1085,15 @@ elif selected_tab == "Delta Hedging":
                     init_spot = hist_data['Close'].iloc[0]
                     
                     # --- INSTANTIATION ---
+                    # Ensure maturity exceeds backtest duration to avoid maturity spikes mid-backtest
+                    days_in_backtest = (end_d - start_d).days
+                    years_in_backtest = days_in_backtest / 365.25
+                    safe_maturity = max(bt_maturity, years_in_backtest + (1/252))
+
                     if p_type == "Phoenix":
                         opt_hedge = PhoenixStructure(
                             S=init_spot, 
-                            T=bt_maturity, 
+                            T=safe_maturity, 
                             r=r, 
                             sigma=sold_vol, 
                             q=q,
@@ -1093,12 +1110,13 @@ elif selected_tab == "Delta Hedging":
                         opt_hedge = EuropeanOption(
                             S=init_spot, 
                             K=strike_bt, 
-                            T=bt_maturity, 
+                            T=safe_maturity, 
                             r=r, 
                             sigma=sold_vol, 
                             q=q, 
-                            option_type="Call" if is_call else "Put"
+                            option_type="call" if is_call else "put"
                         )
+
 
                     # --- ENGINE EXECUTION ---
                     hedging_engine = DeltaHedgingEngine(

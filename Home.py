@@ -4,7 +4,7 @@ from src.shared.ui import render_header
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
     page_title="Home",
-    page_icon="",
+    page_icon="assets/logo.png",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -207,7 +207,7 @@ st.markdown("<h1 style='text-align: center; margin-bottom: 10px;'>Choose Your Pr
 # --- DYNAMIC SUBTITLE ---
 st.markdown(
     "<p style='text-align: center; margin-bottom: 50px; color: gray; font-size: 1.1rem;'>"
-    "Bridging quantitative theory with industrial implementation through interactive research modules."
+    "Every project is designed as an interactive educational experience: complex analytics are thoroughly explained in plain English, while intelligent caching and background pre-computation ensure a seamless, lightning-fast exploration."
     "</p>", 
     unsafe_allow_html=True
 )
@@ -274,7 +274,7 @@ with col3:
         with b_col1:
             # Visually "Primary" Button (Green)
             if st.button("Explore", key="btn_vol", type="primary", use_container_width=True):
-                st.toast("🚧 Work in Progress! Please check the Methodology for details.", icon="⚠️")
+                st.switch_page("pages/03_Robust_Covariance.py")
         with b_col2:
             if st.button("Methodology", key="story_p3", use_container_width=True):
                 show_methodology("Robust Covariance Estimation (In Dev)", story_p3)

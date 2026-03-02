@@ -3,7 +3,7 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.colors as pc
 from plotly.subplots import make_subplots
-from src.alpha.universe import get_asset_name
+from src.shared.universe import get_asset_name
 import plotly.express as px
 import scipy.stats as stats
 

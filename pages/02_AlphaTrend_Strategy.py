@@ -1,11 +1,10 @@
 import streamlit as st
 import pandas as pd
 import datetime
-from src.alpha.universe import get_asset_name
-import src.alpha.universe as universe
-
+from src.shared.universe import get_asset_name
+import src.shared.universe as universe
 from src.shared.market_data import MarketData
-from src.alpha.universe import get_universe, ASSET_POOLS
+from src.shared.universe import get_universe, ASSET_POOLS
 from src.alpha.backtester import BacktestEngine
 import src.alpha.analytics as analytics
 from src.shared.ui import render_header
@@ -43,8 +42,20 @@ def update_corr_from_bottom():
     st.session_state.run_trigger = True
 
 # --- PAGE CONFIGURATION ---
-st.set_page_config(page_title="AlphaStream Strategy", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="AlphaStream Strategy", page_icon="assets/logo.png", layout="wide", initial_sidebar_state="collapsed")
 render_header()
+
+st.title("Systematic Macro & Risk-On/Risk-Off Strategy")
+with st.expander("Pourquoi ce projet ?"):
+    st.markdown("""
+    ### Cross-Asset Momentum & Dynamic Correlation Filter
+    Systematic trend-following (CTA) strategies thrive on capturing sustained market moves. However, blindly following trends across a highly correlated universe leads to dangerous portfolio concentration and sudden, violent drawdowns when the entire market reverses.
+
+    **The objective?** To build a robust systematic engine that dynamically filters out correlated bets. 
+    1. The core Alpha engine generates pure momentum signals (Risk-On / Risk-Off).
+    2. The Risk engine penalizes new signals if their underlying asset is too highly correlated with the existing portfolio.
+    This creates an all-weather portfolio structurally resistant to massive market whiplashes.
+    """)
 
 st.markdown("""
     <style>
