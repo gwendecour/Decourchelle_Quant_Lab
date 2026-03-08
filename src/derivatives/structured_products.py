@@ -3,9 +3,10 @@ import plotly.graph_objects as go
 from scipy.interpolate import make_interp_spline
 from src.derivatives.monte_carlo import MonteCarloEngine
 from src.derivatives.instruments import FinancialInstrument
+from src.derivatives.numerical_greeks import NumericalGreeksEngine
 import plotly.express as px
 
-class PhoenixStructure(MonteCarloEngine, FinancialInstrument):
+class PhoenixStructure(MonteCarloEngine, NumericalGreeksEngine, FinancialInstrument):
     
     def __init__(self, **kwargs):
         """
@@ -98,116 +99,72 @@ class PhoenixStructure(MonteCarloEngine, FinancialInstrument):
         payoffs = self.calculate_payoffs_distribution()
         return np.mean(payoffs)
 
+class BarrierOption(MonteCarloEngine, NumericalGreeksEngine, FinancialInstrument):
+    def __init__(self, **kwargs):
+        S = float(kwargs.get('S'))
+        self.nominal = S
+        self.coupon_rate = kwargs.get('coupon_rate')
+
+        self.knock_type = kwargs.get('knock_type')
+        self.direction = kwargs.get('direction')
+        self.option_type = kwargs.get('option_type')
+        self.K = kwargs.get('K') 
+        self.barrier = S * kwargs.get('barrier')
+        maturity = float(kwargs.get('T'))
+        
+        self.window_start = float(kwargs.get('window_start', 0.0))
+        self.window_end = float(kwargs.get('window_end', maturity))
+        
+        r = kwargs.get('r')
+
+        steps = max(int(252 * maturity), 1)
+        self.steps = steps
+
+        num_simulations = kwargs.get('num_simulations', 10000)
+        self.num_simulations = num_simulations
+
+        MonteCarloEngine.__init__(self,S=S, K=self.K, T=maturity, r=r, sigma=kwargs.get('sigma'), q=kwargs.get('q', 0.0), num_simulations=num_simulations, num_steps=steps, seed=kwargs.get('seed'))
+        FinancialInstrument.__init__(self, **kwargs)    
+
+        pass
+
     # ==========================================================================
-    # SENSITIVITIES & RISK (FINITE DIFFERENCES)
+    # CORE PRICING (MONTE CARLO)
     # ==========================================================================
-
-    def calculate_delta_quick(self, n_sims=2000):
-        """
-        Approximates Delta via Finite Differences (Bump & Revalue).
-        Reduces default simulations count to maintain UI responsiveness.
-        """
-        original_N = self.N
-        original_S = self.S
-        original_seed = self.seed if self.seed is not None else 42
+    def calculate_payoffs_distribution(self):
+        paths = self.generate_paths()
         
-        self.N = n_sims
-        epsilon = self.S * 0.01
+        if self.option_type == "call":
+            vanilla_payoffs = np.maximum(paths[-1] - self.K, 0)
+        elif self.option_type == "put":
+            vanilla_payoffs = np.maximum(self.K - paths[-1], 0)
+        elif self.option_type in ["one touch", "no touch"]:
+            vanilla_payoffs = np.full(self.N, self.nominal)
+            
+        start_idx = int((self.window_start / self.T) * self.steps) if self.T > 0 else 0
+        end_idx = int((self.window_end / self.T) * self.steps) + 1 if self.T > 0 else len(paths)
+        window_paths = paths[start_idx:end_idx]
+            
+        if self.direction == "up":
+            touched_barrier = np.max(window_paths, axis=0) >= self.barrier
+        elif self.direction == "down":
+            touched_barrier = np.min(window_paths, axis=0) <= self.barrier
         
-        self.S = original_S + epsilon
-        self.seed = original_seed
-        price_up = self.price()
+        payoffs = np.zeros(self.N) 
         
-        self.S = original_S - epsilon
-        self.seed = original_seed
-        price_down = self.price()
-        
-        self.S = original_S
-        self.N = original_N
-        self.seed = original_seed
-        
-        delta = (price_up - price_down) / (2 * epsilon)
-        
-        return delta
-
-    def greeks(self):
-        """
-        Computes Delta, Gamma, and Vega using Finite Differences (Bump & Revalue method).
-        Spot is bumped by 1%, Volatility by 1 absolute point.
-        """
-        original_seed = self.seed if self.seed else 42
-        self.seed = original_seed
-        base_price = self.price()
-        
-        epsilon = self.S * 0.01 
-        orig_S = self.S
-        
-        self.S = orig_S + epsilon
-        self.seed = original_seed
-        p_up = self.price()
-        
-        self.S = orig_S - epsilon
-        self.seed = original_seed
-        p_down = self.price()
-        
-        self.S = orig_S 
-        
-        delta = (p_up - p_down) / (2 * epsilon)
-        gamma = (p_up - 2 * base_price + p_down) / (epsilon**2)
-        
-        orig_sigma = self.sigma
-        self.sigma = orig_sigma + 0.01
-        self.seed = original_seed
-        p_vol_up = self.price()
-        self.sigma = orig_sigma
-        
-        vega = p_vol_up - base_price
-        
-        return {"delta": delta, "gamma": gamma, "vega": vega, "theta": 0.0, "rho": 0.0}
-
-    def compute_scenario_matrices(self, spot_range_pct, vol_range_abs, n_spot, n_vol, matrix_sims=1000):
-        """
-        Computes Hedged and Unhedged P&L matrices across Spot and Volatility shifts.
-        Limits N simulations (matrix_sims) to ensure realistic computation times.
-        """
-        original_N = self.N
-        original_S = self.S
-        original_sigma = self.sigma
-        original_seed = self.seed if self.seed is not None else 42
-        
-        self.N = matrix_sims
-        
-        self.seed = original_seed
-        initial_price = self.price()
-        
-        initial_delta = self.calculate_delta_quick(n_sims=matrix_sims)
-
-        spot_moves = np.linspace(-spot_range_pct, spot_range_pct, int(n_spot))
-        vol_moves = np.linspace(-vol_range_abs, vol_range_abs, int(n_vol))
-
-        matrix_unhedged = np.zeros((len(vol_moves), len(spot_moves)))
-        matrix_hedged = np.zeros((len(vol_moves), len(spot_moves)))
-
-        for i, v_chg in enumerate(vol_moves):
-            for j, s_chg in enumerate(spot_moves):
-                
-                self.S = original_S * (1 + s_chg)
-                self.sigma = max(0.01, original_sigma + v_chg) 
-                self.seed = original_seed 
-                
-                new_price = self.price()
-
-                pnl_opt = initial_price - new_price
-                
-                pnl_shares = initial_delta * (self.S - original_S)
-                
-                matrix_unhedged[i, j] = pnl_opt
-                matrix_hedged[i, j] = pnl_opt + pnl_shares
-
-        self.N = original_N
-        self.S = original_S
-        self.sigma = original_sigma
-        self.seed = original_seed
-
-        return matrix_unhedged, matrix_hedged, spot_moves, vol_moves
-
+        if self.option_type == "one touch":
+            payoffs[touched_barrier] = self.nominal
+        elif self.option_type == "no touch":
+            not_touched = ~touched_barrier 
+            payoffs[not_touched] = self.nominal
+        elif self.knock_type == "in":
+            payoffs[touched_barrier] = vanilla_payoffs[touched_barrier]
+        elif self.knock_type == "out":
+            not_touched = ~touched_barrier 
+            payoffs[not_touched] = vanilla_payoffs[not_touched]
+            
+        return payoffs 
+    def price(self):
+        payoffs = self.calculate_payoffs_distribution()
+        discount_factor = np.exp(-self.r * self.T)
+        return np.mean(payoffs) * discount_factor

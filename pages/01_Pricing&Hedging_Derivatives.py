@@ -8,7 +8,7 @@ import datetime
 from src.shared.market_data import MarketData
 from src.derivatives.instruments import InstrumentFactory
 from src.derivatives.pricing_model import EuropeanOption
-from src.derivatives.structured_products import PhoenixStructure
+from src.derivatives.structured_products import PhoenixStructure, BarrierOption
 from src.derivatives.backtester import DeltaHedgingEngine
 import src.derivatives.analytics as analytics
 import src.derivatives.cache_manager as cache_manager
@@ -52,7 +52,7 @@ with st.expander("The motivations behind this project"):
 defaults = {
     'custom_spot': 100.0, 'custom_vol': 0.20, 'custom_rate': 0.04, 'custom_div': 0.00,
     'ticker_ref': None, 'global_product_type': None, 
-    'strike_pct': 100.0, 'barrier_pct': 0.60, 'coupon_barrier_pct': 0.70, 
+    'strike_pct': 100.0, 'barrier_pct': 0.60, 'bar_pct_input': 120.0, 'coupon_barrier_pct': 0.70, 
     'autocall_pct': 1.00, 'coupon_rate': 0.08, 'maturity': 1.0,
     'market_spot': None, 'market_vol': None, 'market_rate': None, 'market_div': None
 }
@@ -141,9 +141,10 @@ def make_input_group(label, key_base, min_v, max_v, step, format_str="%.2f"):
     col_s, col_i = st.columns([3, 1])
     
     with col_s:
-        # Slider
+        # Slider - If no max value, slider needs an arbitrary max based on current value for UI to work
+        slider_max = max_v if max_v is not None else max(100.0, current_master_val * 2.0)
         st.slider(
-            label, min_v, max_v, step=step, 
+            label, min_v, slider_max, step=step, 
             key=f"sl_{key_base}", 
             on_change=sync_input, 
             args=(key_base, f"sl_{key_base}"), # Arguments passés au callback
@@ -153,7 +154,7 @@ def make_input_group(label, key_base, min_v, max_v, step, format_str="%.2f"):
     with col_i:
         # Box
         st.number_input(
-            "", min_v, max_v, step=step, format=format_str, 
+            "", min_value=min_v, max_value=max_v, step=step, format=format_str, 
             key=f"num_{key_base}",
             on_change=sync_input, 
             args=(key_base, f"num_{key_base}"), 
@@ -197,9 +198,28 @@ def switch_to_custom_market():
     st.session_state.gk_vol_slider = new_vol * 100.0
 
 def update_market_data():
-    ticker = st.session_state.ticker_input
+    main_ticker = st.session_state.ticker_input
+    
+    if main_ticker == "SEARCH_UNIVERSE":
+        ticker = st.session_state.get("univ_selector")
+    elif main_ticker == "CUSTOM_YF":
+        ticker = st.session_state.get("yf_input")
+        if ticker:
+            ticker = ticker.upper().strip()
+    else:
+        ticker = main_ticker
+
+    if not ticker:
+        st.warning("Please select or enter a valid ticker first.")
+        return
+    if ticker == "CUSTOM":
+        return
+        
     try:
         spot = MarketData.get_spot(ticker)
+        if spot is None:
+            st.error(f"Could not retrieve spot price for {ticker}. Please check the ticker symbol.")
+            return
         vol = MarketData.get_volatility(ticker, "1y")
         rate = MarketData.get_risk_free_rate() or 0.04
         div = MarketData.get_dividend_yield(ticker) or 0.0
@@ -309,42 +329,51 @@ def set_greeks_scenario(scenario_type):
 # ==============================================================================
 # HEADER
 # ==============================================================================
-TICKERS = {
-    "GLE.PA": "SocGen (Bank)",
-    "BNP.PA": "BNP Paribas (Bank)",
-    "MC.PA": "LVMH (Luxury)",
-    "TTE.PA": "TotalEnergies (Energy)",
-    "SAN.PA": "Sanofi (Health)",
-    "AIR.PA": "Airbus (Indus)",
-    "CAP.PA": "Capgemini (Tech)",
-    "CUSTOM": "User Defined Data"
-}
+from src.shared.universe import ASSET_DESCRIPTIONS
 
 with st.container(border=True):
     c1, c2, c3, c4 = st.columns([1.5, 1.5, 1.5, 4])
     
     with c1:
         def format_ticker(x):
-            if x == "CUSTOM":
-                return f"{x} - Manual Override"
-            return f"{x} - {TICKERS[x]}"
+            if x == "CUSTOM": return "CUSTOM - User Defined Data"
+            if x == "SEARCH_UNIVERSE": return "Search Universe (Explore all assets)..."
+            if x == "CUSTOM_YF": return "Custom Ticker (Yahoo Finance)..."
+            return f"{x} - {ASSET_DESCRIPTIONS.get(x, '')}"
+
+        classics = ["GLD", "TLT", "EURUSD=X", "SPY", "XLK", "XLV", "XLE", "XLF"]
+        options = classics + ["SEARCH_UNIVERSE", "CUSTOM_YF", "CUSTOM"]
 
         selected_ticker = st.selectbox(
             "Ticker", 
-            options=list(TICKERS.keys()), 
+            options=options, 
             index=None, 
-            placeholder="Select Ticker...", 
-            format_func=format_ticker, 
+            placeholder="Select a Ticker...", 
+            format_func=format_ticker,
             key="ticker_input",
             label_visibility="collapsed"
         )
-        if selected_ticker == "CUSTOM":
+        
+        if selected_ticker == "SEARCH_UNIVERSE":
+            sorted_univ = sorted(list(ASSET_DESCRIPTIONS.keys()), key=lambda x: ASSET_DESCRIPTIONS[x])
+            st.selectbox(
+                "Search Universe", 
+                options=sorted_univ,
+                index=None,
+                format_func=lambda x: f"{x} - {ASSET_DESCRIPTIONS.get(x, '')}",
+                key="univ_selector",
+                placeholder="Type to search (e.g. Oil, Silver...)",
+                label_visibility="collapsed"
+            )
+        elif selected_ticker == "CUSTOM_YF":
+            st.text_input("Enter Yahoo Finance Ticker", key="yf_input", placeholder="e.g. AAPL", label_visibility="collapsed")
+        elif selected_ticker == "CUSTOM":
             st.markdown("<div style='color: #ffaa00; font-size: 0.85em; font-weight: 600; margin-top: -5px;'>⚠️ Custom Values Loaded</div>", unsafe_allow_html=True)
         
     with c2:
         selected_product = st.selectbox(
             "Product", 
-            options=["Call", "Put", "Phoenix"], 
+            options=["Call", "Put", "Barrier Option", "Phoenix"], 
             index=None, 
             placeholder="Select Product...", 
             key="global_product_type",
@@ -387,6 +416,14 @@ if not selected_ticker or not selected_product or st.session_state.get('market_s
 # ==============================================================================
 selected_tab = st.radio("Navigation", ["Pricing & Payoff", "Greeks & Heatmaps", "Delta Hedging"], horizontal=True, label_visibility="collapsed")
 
+if "previous_tab" not in st.session_state:
+    st.session_state.previous_tab = selected_tab
+
+if st.session_state.previous_tab != selected_tab:
+    if selected_tab == "Greeks & Heatmaps":
+        set_greeks_scenario("Reset")
+    st.session_state.previous_tab = selected_tab
+
 S, sigma = st.session_state.custom_spot, st.session_state.custom_vol
 r, q = st.session_state.custom_rate, st.session_state.custom_div
 p_type = st.session_state.global_product_type
@@ -398,8 +435,8 @@ if selected_tab == "Pricing & Payoff":
     # --- MARKET INPUTS ---
     with layout_col1:
         st.markdown("### Market")
-        make_input_group("Spot ($)", "custom_spot", 10.0, 700.0, 0.5)
-        make_input_group("Vol (σ)", "custom_vol", 0.01, 1.00, 0.005)
+        make_input_group("Spot ($)", "custom_spot", 0.0, None, 0.5)
+        make_input_group("Vol (σ)", "custom_vol", 0.01, 2.00, 0.005)
         make_input_group("Rate (r)", "custom_rate", 0.00, 0.20, 0.001, "%.3f")
         make_input_group("Div (q)", "custom_div", 0.00, 0.20, 0.001, "%.3f")
 
@@ -425,6 +462,41 @@ if selected_tab == "Pricing & Payoff":
 
             st.button("Reset Market Values", on_click=set_pricing_scenario, args=("Reset",), use_container_width=True, help="Resets Spot/Vol/Rate to fetched data")
             st.button("Reset Properties", on_click=reset_phoenix_props, use_container_width=True, help="Resets Barriers and Coupon to default")
+
+        elif p_type == "Barrier Option":
+            c_type, c_dir, c_knock = st.columns(3)
+            with c_type: 
+                o_type = st.selectbox("Type", ["Call", "Put", "One Touch", "No Touch"], key="bar_otype")
+            with c_dir: 
+                b_dir = st.selectbox("Direction", ["Up", "Down"], key="bar_dir")
+            with c_knock: 
+                if o_type in ["Call", "Put"]:
+                    b_knock = st.selectbox("Knock", ["In", "Out"], key="bar_knock")
+                    
+            if o_type in ["Call", "Put"]:
+                make_input_group("Strike (%)", "strike_pct", 50.0, 150.0, 1.0)
+                strike_price = S * (st.session_state.strike_pct / 100.0)
+                st.caption(f"Strike: **{strike_price:.2f} €**")
+            
+            make_input_group("Barrier (%)", "bar_pct_input", 50.0, 150.0, 1.0)
+            barrier_price = S * (st.session_state.get('bar_pct_input', 120.0) / 100.0)
+            st.caption(f"Barrier: **{barrier_price:.2f} €**")
+            
+            use_window = st.toggle("Observation Window", value=False, key="bar_use_window")
+            if use_window:
+                window_pct = st.slider("Active Window (% of Maturity)", 0, 100, (0, 100), key="bar_window")
+                w_start = (window_pct[0] / 100.0) * maturity
+                w_end = (window_pct[1] / 100.0) * maturity
+                st.caption(f"Observed from month {w_start*12:.1f} to {w_end*12:.1f}")
+                
+            n_sims = st.selectbox("Sims", [2000, 5000, 10000], index=0, key="bar_sims")
+            
+            if o_type in ["Call", "Put"]:
+                b1, b2, b3, b4 = st.columns(4, gap="small")
+                with b1: st.button("Reset", on_click=set_pricing_scenario, args=("Reset",), use_container_width=True)
+                with b2: st.button("ATM", on_click=set_pricing_scenario, args=("ATM",), use_container_width=True)
+                with b3: st.button("ITM", on_click=set_pricing_scenario, args=("ITM",), use_container_width=True)
+                with b4: st.button("OTM", on_click=set_pricing_scenario, args=("OTM",), use_container_width=True)
 
         elif p_type in ["Call", "Put"]:
             make_input_group("Moneyness (%)", "strike_pct", 50.0, 150.0, 1.0)
@@ -466,6 +538,41 @@ if selected_tab == "Pricing & Payoff":
             price = product.price()
             fig_main = analytics.plot_payoff(product, spot_range=[S*0.5, S*1.5])
             metric_lbl, metric_val = "Barrier", f"{S*st.session_state.barrier_pct:.2f} €"
+        elif p_type == "Barrier Option":
+            opt_type_val = st.session_state.get("bar_otype", "Call").lower()
+            dir_val = st.session_state.get("bar_dir", "Up").lower()
+            knock_val = st.session_state.get("bar_knock", "In").lower()
+            
+            strike_val = S * (st.session_state.strike_pct / 100.0)
+            bar_pct = st.session_state.get('bar_pct_input', 120.0) / 100.0
+            
+            use_w = st.session_state.get("bar_use_window", False)
+            if use_w:
+                w_pct = st.session_state.get("bar_window", (0, 100))
+                w_s = (w_pct[0] / 100.0) * maturity
+                w_e = (w_pct[1] / 100.0) * maturity
+            else:
+                w_s = 0.0
+                w_e = maturity
+            
+            product = BarrierOption(
+                S=S, K=strike_val, T=maturity, r=r, sigma=sigma, q=q,
+                option_type=opt_type_val, direction=dir_val, knock_type=knock_val, barrier=bar_pct,
+                window_start=w_s, window_end=w_e,
+                num_simulations=st.session_state.get("bar_sims", 2000)
+            )
+            price = product.price()
+            fig_main = analytics.plot_payoff(product, spot_range=[S*0.6, S*1.4])
+            metric_lbl, metric_val = "Barrier Dist.", f"{((bar_pct)-1)*100:+.1f}%"
+            
+            if opt_type_val in ["one touch", "no touch"]:
+                payoff_exp = f"**{dir_val.title()} {opt_type_val.title()}**<br>Binary Option. Pays 100% of nominal (100€) if the barrier is **{'breached' if opt_type_val=='one touch' else 'NEVER breached'}**."
+            else:
+                payoff_exp = f"**{knock_val.title()} {dir_val.title()} {opt_type_val.title()}**<br>Payoff is entirely path-dependent. If the spot {dir_val}s to {barrier_price:.2f} before maturity, the option knocks {knock_val}."
+            
+            window_msg = f"(Window: M{w_s*12:.0f}-M{w_e*12:.0f})" if use_w else "(Continuous)"
+            note = f"Monte Carlo Pricer ({product.num_simulations} sims): Simulates daily tracking for breach analysis {window_msg}."
+            
         else:
             strike_val = S * (st.session_state.strike_pct / 100.0)
             opt_type = "Call" if "Call" in p_type else "Put"
@@ -569,6 +676,8 @@ if selected_tab == "Pricing & Payoff":
                 note = "**Trend:** Increasing. Higher strike increases probability of exercise."
             elif p_type == "Phoenix":
                 note = "**Trend:** Sharp rise below Protection Barrier, steady in Coupon Zone, flat above Autocall."
+            elif p_type == "Barrier Option":
+                note = "**Trend:** Varies greatly depending on the interplay between Strike and Barrier level."
             st.caption(note)
             
     with graph_col2:
@@ -580,6 +689,8 @@ if selected_tab == "Pricing & Payoff":
                 note_vol = "**Trend:** Positive Vega. Long options benefit from higher uncertainty/volatility."
             elif p_type == "Phoenix":
                 note_vol = "**Trend:** Negative Vega. Higher volatility increases the risk of hitting the downside barrier, lowering the price."
+            elif p_type == "Barrier Option":
+                note_vol = "**Trend:** Mixed Vega. Increased volatility increases the chance of hitting the barrier (good for knock-in, bad for knock-out)."
             st.caption(note_vol)
 
         # --- BACKGROUND PRE-WARMING ---
@@ -679,6 +790,15 @@ elif selected_tab == "Greeks & Heatmaps":
         # Range definition
         max_spot = float(ref_value * 2.0) if ref_value > 0 else 100.0
         
+        # Ensure simulated spot and initialized components are within range
+        sim_v = min(max_spot, max(0.0, st.session_state.get('sim_spot_val', ref_value)))
+        st.session_state.sim_spot_val = sim_v
+        
+        if st.session_state.get('gk_slider_spot', 0) > max_spot:
+             st.session_state.gk_slider_spot = max_spot
+        if st.session_state.get('gk_box_spot', 0) > max_spot:
+             st.session_state.gk_box_spot = max_spot
+             
         # Slider / Box Display
         c_sim1, c_sim2 = st.columns([3, 1])
         with c_sim1:
@@ -747,6 +867,31 @@ elif selected_tab == "Greeks & Heatmaps":
             
             # Full Greeks calculated instantly
             with st.spinner("Computing Full Phoenix Greeks..."):
+                c_greeks = prod_gk.greeks()
+            greeks = {k: -v for k, v in c_greeks.items()}
+
+        elif p_type == "Barrier Option":
+            opt_type_val = st.session_state.get("bar_otype", "Call").lower()
+            dir_val = st.session_state.get("bar_dir", "Up").lower()
+            knock_val = st.session_state.get("bar_knock", "In").lower()
+            bar_pct = st.session_state.get('bar_pct_input', 120.0) / 100.0
+            
+            use_w = st.session_state.get("bar_use_window", False)
+            if use_w:
+                w_pct = st.session_state.get("bar_window", (0, 100))
+                w_s = (w_pct[0] / 100.0) * fixed_maturity
+                w_e = (w_pct[1] / 100.0) * fixed_maturity
+            else:
+                w_s = 0.0
+                w_e = fixed_maturity
+            
+            prod_gk = BarrierOption(
+                S=dyn_spot, K=fixed_strike, T=fixed_maturity, r=r, sigma=dyn_vol, q=q,
+                option_type=opt_type_val, direction=dir_val, knock_type=knock_val, barrier=bar_pct,
+                window_start=w_s, window_end=w_e,
+                num_simulations=2000
+            )
+            with st.spinner("Computing Barrier Greeks..."):
                 c_greeks = prod_gk.greeks()
             greeks = {k: -v for k, v in c_greeks.items()}
 
@@ -937,7 +1082,7 @@ elif selected_tab == "Greeks & Heatmaps":
         hm_vol_rng = st.slider("Matrix Vol Range (pts)", 5, 50, 10, 5) / 100
     with hm_c3:
         hm_mode = st.radio("View Mode", ["2D Matrix", "3D Surface"], horizontal=True)
-        if p_type == "Phoenix":
+        if p_type in ["Phoenix", "Barrier Option"]:
             mc_prec = st.select_slider("MC Precision", [500, 1000, 2000], value=1000)
         else:
             mc_prec = 0
@@ -961,7 +1106,7 @@ elif selected_tab == "Greeks & Heatmaps":
     
     else:
         with st.spinner("Generating Surface..."):
-            n_g = 15 if p_type != "Phoenix" else 9
+            n_g = 15 if mc_prec == 0 else 9
             mat_u, _, x_m, y_m = prod_gk.compute_scenario_matrices(
                 spot_range_pct=hm_spot_rng, vol_range_abs=hm_vol_rng, n_spot=n_g, n_vol=n_g, matrix_sims=mc_prec
             )

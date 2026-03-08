@@ -271,8 +271,65 @@ def plot_risk_profile_european(option, spot_range):
 
 
 # ==============================================================================
-# PHOENIX STRUCTURE ANALYTICS
+# PHOENIX STRUCTURE & BARRIER OPTION ANALYTICS
 # ==============================================================================
+
+def plot_payoff_barrier(struct, spot_range=None):
+    """Plots the Barrier Option theoretical payout profile at maturity across spot levels."""
+    if spot_range is None:
+        spot_range = [struct.S * 0.5, struct.S * 1.5]
+    
+    spots = np.linspace(spot_range[0], spot_range[1], 300)
+    payoffs = np.zeros_like(spots)
+    
+    for i, S_T in enumerate(spots):
+        barrier_hit = False
+        if struct.direction == "up" and S_T >= struct.barrier:
+            barrier_hit = True
+        elif struct.direction == "down" and S_T <= struct.barrier:
+            barrier_hit = True
+            
+        if struct.option_type == "one touch":
+            payoffs[i] = struct.nominal if barrier_hit else 0.0
+        elif struct.option_type == "no touch":
+            payoffs[i] = 0.0 if barrier_hit else struct.nominal
+        else:
+            if struct.option_type == "call":
+                vanilla_val = max(S_T - struct.K, 0)
+            elif struct.option_type == "put":
+                vanilla_val = max(struct.K - S_T, 0)
+            
+            if struct.knock_type == "in":
+                payoffs[i] = vanilla_val if barrier_hit else 0.0
+            else: # Out
+                payoffs[i] = 0.0 if barrier_hit else vanilla_val
+
+    fig = go.Figure()
+    
+    fig.add_trace(go.Scatter(
+        x=spots, y=payoffs, 
+        mode='lines', 
+        name=f'{struct.knock_type.title()} {struct.direction.title()} {struct.option_type.title()}',
+        line=dict(color='#AB63FA', width=3),
+        hovertemplate="Spot: %{x:.2f}<br>Payoff: %{y:.2f} €<extra></extra>"
+    ))
+
+    if struct.option_type not in ["one touch", "no touch"]:
+        fig.add_vline(x=struct.K, line_dash="dash", line_color="gray", annotation_text=f"Strike: {struct.K:.1f}")
+        
+    if struct.barrier >= spot_range[0] and struct.barrier <= spot_range[1]:
+        fig.add_vline(x=struct.barrier, line_dash="solid", line_color="red", annotation_text=f"Barrier: {struct.barrier:.1f}", annotation_position="top")
+
+    fig.update_layout(
+        title="Theoretical Payoff at Maturity (Static Scenario)",
+        xaxis_title="Spot Price at Maturity",
+        yaxis_title="Payoff (€)",
+        template="plotly_dark" if st.session_state.get("theme", "dark") == "dark" else "plotly_white",
+        height=350,
+        margin=dict(l=20, r=20, t=40, b=20),
+        hovermode="x unified"
+    )
+    return fig
 
 def plot_payoff_phoenix(struct, spot_range=None):
     """Plots the Phoenix theoretical payout profile at maturity across spot levels."""
@@ -658,6 +715,8 @@ def plot_pnl(engine):
 def plot_payoff(product, spot_range=None):
     if type(product).__name__ == "EuropeanOption":
         return plot_payoff_european(product, spot_range)
+    elif type(product).__name__ == "BarrierOption":
+        return plot_payoff_barrier(product, spot_range)
     return plot_payoff_phoenix(product, spot_range)
 
 def plot_price_vs_strike(product, current_spot):
