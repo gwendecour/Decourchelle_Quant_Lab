@@ -1,17 +1,4 @@
 import streamlit as st
-import numpy as np
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import datetime
-
-# --- MODULE IMPORTS ---
-from src.shared.market_data import MarketData
-from src.derivatives.instruments import InstrumentFactory
-from src.derivatives.pricing_model import EuropeanOption
-from src.derivatives.structured_products import PhoenixStructure, BarrierOption
-from src.derivatives.backtester import DeltaHedgingEngine
-import src.derivatives.analytics as analytics
-import src.derivatives.cache_manager as cache_manager
 from src.shared.ui import render_header
 
 # --- PAGE CONFIGURATION ---
@@ -116,8 +103,8 @@ def sync_sim_to_strike():
     st.session_state.box_sim_spot = new_val
 
 # --- Slider <-> Input synchronization functions (TAB 1) ---
-def sync_input(master_key, changed_widget_key):
-    """Synchronizes Slider <-> Number Input and activates CUSTOM mode."""
+def sync_input(master_key, changed_widget_key, is_market_data=False):
+    """Synchronizes Slider <-> Number Input and activates CUSTOM mode if it's market data."""
     new_value = st.session_state[changed_widget_key]
     st.session_state[master_key] = new_value
     
@@ -126,9 +113,10 @@ def sync_input(master_key, changed_widget_key):
     else:
         st.session_state[f"sl_{master_key}"] = new_value
         
-    st.session_state.ticker_input = "CUSTOM"
+    if is_market_data:
+        st.session_state.ticker_input = "CUSTOM"
 
-def make_input_group(label, key_base, min_v, max_v, step, format_str="%.2f"):
+def make_input_group(label, key_base, min_v, max_v, step, format_str="%.2f", is_market_data=False):
     """Crée un slider et un input box synchronisés"""
     
     # --- CRUCIAL: FORCE SYNC BEFORE DISPLAY ---
@@ -147,7 +135,7 @@ def make_input_group(label, key_base, min_v, max_v, step, format_str="%.2f"):
             label, min_v, slider_max, step=step, 
             key=f"sl_{key_base}", 
             on_change=sync_input, 
-            args=(key_base, f"sl_{key_base}"), # Arguments passés au callback
+            args=(key_base, f"sl_{key_base}", is_market_data), # Arguments passés au callback
             label_visibility="visible"
         )
         
@@ -157,7 +145,7 @@ def make_input_group(label, key_base, min_v, max_v, step, format_str="%.2f"):
             "", min_value=min_v, max_value=max_v, step=step, format=format_str, 
             key=f"num_{key_base}",
             on_change=sync_input, 
-            args=(key_base, f"num_{key_base}"), 
+            args=(key_base, f"num_{key_base}", is_market_data), 
             label_visibility="hidden"
         )
 
@@ -198,6 +186,7 @@ def switch_to_custom_market():
     st.session_state.gk_vol_slider = new_vol * 100.0
 
 def update_market_data():
+    from src.shared.market_data import MarketData
     main_ticker = st.session_state.ticker_input
     
     if main_ticker == "SEARCH_UNIVERSE":
@@ -411,6 +400,19 @@ if not selected_ticker or not selected_product or st.session_state.get('market_s
         
     st.stop()
 
+# --- LAZY LOADED IMPORTS ---
+import numpy as np
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+import datetime
+
+from src.derivatives.instruments import InstrumentFactory
+from src.derivatives.pricing_model import EuropeanOption
+from src.derivatives.structured_products import PhoenixStructure, BarrierOption, AmericanOption
+from src.derivatives.backtester import DeltaHedgingEngine
+import src.derivatives.analytics as analytics
+import src.derivatives.cache_manager as cache_manager
+
 # ==============================================================================
 # TABS
 # ==============================================================================
@@ -435,10 +437,10 @@ if selected_tab == "Pricing & Payoff":
     # --- MARKET INPUTS ---
     with layout_col1:
         st.markdown("### Market")
-        make_input_group("Spot ($)", "custom_spot", 0.0, None, 0.5)
-        make_input_group("Vol (σ)", "custom_vol", 0.01, 2.00, 0.005)
-        make_input_group("Rate (r)", "custom_rate", 0.00, 0.20, 0.001, "%.3f")
-        make_input_group("Div (q)", "custom_div", 0.00, 0.20, 0.001, "%.3f")
+        make_input_group("Spot ($)", "custom_spot", 0.0, None, 0.5, is_market_data=True)
+        make_input_group("Vol (σ)", "custom_vol", 0.01, 2.00, 0.005, is_market_data=True)
+        make_input_group("Rate (r)", "custom_rate", 0.00, 0.20, 0.001, "%.3f", is_market_data=True)
+        make_input_group("Div (q)", "custom_div", 0.00, 0.20, 0.001, "%.3f", is_market_data=True)
 
     # --- PRODUCT INPUTS ---
     with layout_col2:
@@ -474,6 +476,7 @@ if selected_tab == "Pricing & Payoff":
                     b_knock = st.selectbox("Knock", ["In", "Out"], key="bar_knock")
                     
             if o_type in ["Call", "Put"]:
+                st.radio("Style", ["European", "American"], horizontal=True, key="bar_style")
                 make_input_group("Strike (%)", "strike_pct", 50.0, 150.0, 1.0)
                 strike_price = S * (st.session_state.strike_pct / 100.0)
                 st.caption(f"Strike: **{strike_price:.2f} €**")
@@ -502,8 +505,13 @@ if selected_tab == "Pricing & Payoff":
             make_input_group("Moneyness (%)", "strike_pct", 50.0, 150.0, 1.0)
             strike_price = S * (st.session_state.strike_pct / 100.0)
             st.caption(f"Strike: **{strike_price:.2f} €**")
-            n_sims = 0
-
+            
+            exec_style = st.radio("Style", ["European", "American"], horizontal=True, key="vanilla_style")
+            if exec_style == "American":
+                n_steps = st.selectbox("Steps (Discretization Nodes)", [100, 300, 500, 1000], index=1, key="bin_steps")
+            else:
+                n_steps = 0
+                
             # --- VANILLA CASE: Structure + Market ---
             
             st.caption("1. Structure / Moneyness")
@@ -559,7 +567,8 @@ if selected_tab == "Pricing & Payoff":
                 S=S, K=strike_val, T=maturity, r=r, sigma=sigma, q=q,
                 option_type=opt_type_val, direction=dir_val, knock_type=knock_val, barrier=bar_pct,
                 window_start=w_s, window_end=w_e,
-                num_simulations=st.session_state.get("bar_sims", 2000)
+                num_simulations=st.session_state.get("bar_sims", 2000),
+                execution_style=st.session_state.get("bar_style", "European")
             )
             price = product.price()
             fig_main = analytics.plot_payoff(product, spot_range=[S*0.6, S*1.4])
@@ -575,8 +584,11 @@ if selected_tab == "Pricing & Payoff":
             
         else:
             strike_val = S * (st.session_state.strike_pct / 100.0)
-            opt_type = "Call" if "Call" in p_type else "Put"
-            product = EuropeanOption(S=S, K=strike_val, T=maturity, r=r, sigma=sigma, q=q, option_type=opt_type)
+            opt_type = "call" if "Call" in p_type else "put"
+            if st.session_state.get("vanilla_style", "European") == "American":
+                product = AmericanOption(S=S, K=strike_val, T=maturity, r=r, sigma=sigma, q=q, option_type=opt_type, steps=n_steps)
+            else:
+                product = EuropeanOption(S=S, K=strike_val, T=maturity, r=r, sigma=sigma, q=q, option_type=opt_type)
             price = product.price()
             fig_main = analytics.plot_payoff(product, spot_range=[S*0.6, S*1.4])
             metric_lbl, metric_val = "Moneyness", f"{(S/strike_val)*100:.1f}%"
@@ -586,22 +598,44 @@ if selected_tab == "Pricing & Payoff":
         k1.metric("Price", f"{price:.2f} €")
         k2.metric("% Nominal", f"{(price/S)*100:.2f} %")
         k3.metric(metric_lbl, metric_val)
+        
+        # Convergence Graph for Monte Carlo engines
+        if type(product).__name__ in ["PhoenixStructure", "BarrierOption"]:
+            with st.expander("Monte Carlo Simulation Variance & Convergence", expanded=False):
+                st.markdown("Because African/American Options and Exotics rely on randomized paths, prices vary subtly between runs. Increasing $N$ reduces this variance (Law of Large Numbers).")
+                with st.spinner("Simulating convergence path..."):
+                    fig_conv = analytics.plot_mc_convergence(product, max_sims=getattr(product, 'num_simulations', 5000))
+                    if fig_conv:
+                        st.plotly_chart(fig_conv, use_container_width=True)
+
 
         
         with st.expander("Model & Algorithm Details (How is the price calculated?)"):
-            if p_type == "Phoenix":
+            if p_type == "Phoenix" or type(product).__name__ == "BarrierOption":
                 st.markdown("""
         **Pricing Engine: Monte Carlo Simulation**
         
-        Since Phoenix Autocalls are **Path-Dependent** structures (the outcome depends on the daily/monthly history of the spot, not just the final value), closed-form formulas (like Black-Scholes) cannot be used directly.
+        Since Autocalls and Barriers are **Path-Dependent** structures (the outcome depends on the entire history of the spot, not just the final value), closed-form formulas (like Black-Scholes) cannot be used directly.
         
         **Algorithm Steps:**
-        *   **Diffusion:** We simulate **2,000 to 10,000 paths** of the underlying asset using Geometric Brownian Motion (GBM).
+        *   **Diffusion:** We simulate paths using Geometric Brownian Motion (GBM). We enforce a constant **300 steps of intraday discretization** for maximum precision regardless of maturity.
             * $dS_t = r S_t dt + \sigma S_t dW_t$
-        *   **Observation:** For each path, we check the barriers (Coupon, Protection, Autocall) at every observation date.
-        *   **Payoff Calculation:** We determine the cash flows for each specific path (Coupons paid, early redemption, or final payout).
+        *   **Observation:** For each path, we check the barriers (Coupon, Protection, Autocall, Knock) at every observation point along the tree.
+        *   **Payoff Calculation:** We determine the cash flows for each specific path (Coupons paid, early redemption, terminal payout or barrier breakage).
         *   **Discounting:** We discount the average payoff back to present value using the risk-free rate $r$.
             * $Price = e^{-rT} \cdot \mathbb{E}^{\mathbb{Q}}[\text{Payoff}]$
+        """)
+            elif type(product).__name__ == "AmericanOption":
+                st.markdown("""
+        **Pricing Engine: Cox-Ross-Rubinstein Binomial Tree**
+        
+        Unlike European options, **American Options** can be exercised at any point before maturity. This early-exercise premium prevents the use of closed-form Black-Scholes formulas. We utilize a discrete-time Binomial Tree model instead.
+        
+        **Algorithm Steps:**
+        *   **Forward Induction:** We build a recombining price tree from $t=0$ to maturity using up/down factors derived from the asset's current volatility $\sigma$.
+        *   **Backward Induction:** Starting from maturity, we calculate the option's value at every node stepping backward in time.
+        *   **Early Exercise Check:** Crucially, at every single node, the engine compares the **Continuation Value** (holding the option) vs the **Intrinsic Value** (exercising immediately).
+            * $V_{node} = Max(Intrinsic, e^{-r\Delta t}[p \cdot V_{up} + (1-p)V_{down}])$
         """)
             else:
         # Define text based on Option type
@@ -897,8 +931,14 @@ elif selected_tab == "Greeks & Heatmaps":
 
         else:
             # Vanilla Case
-            prod_gk = EuropeanOption(S=dyn_spot, K=fixed_strike, T=fixed_maturity, r=r, sigma=dyn_vol, q=q, option_type=p_type)
-            cg = prod_gk.greeks()
+            opt_type = "call" if "Call" in p_type else "put"
+            if st.session_state.get("vanilla_style", "European").lower() == "american":
+                prod_gk = AmericanOption(S=dyn_spot, K=fixed_strike, T=fixed_maturity, r=r, sigma=dyn_vol, q=q, option_type=opt_type, num_simulations=st.session_state.get("bar_sims", 2000))
+                with st.spinner("Computing American Greeks..."):
+                    cg = prod_gk.greeks()
+            else:
+                prod_gk = EuropeanOption(S=dyn_spot, K=fixed_strike, T=fixed_maturity, r=r, sigma=dyn_vol, q=q, option_type=opt_type)
+                cg = prod_gk.greeks()
             greeks = {k: -v for k, v in cg.items()}
 
         # GREEKS DISPLAY
@@ -975,8 +1015,34 @@ elif selected_tab == "Greeks & Heatmaps":
                                       protection_barrier=st.session_state.barrier_pct,
                                       coupon_barrier=st.session_state.coupon_barrier_pct,
                                       coupon_rate=st.session_state.coupon_rate, obs_frequency=4, num_simulations=2000)
+        elif p_type == "Barrier Option":
+            opt_type_r = st.session_state.get("bar_otype", "Call").lower()
+            dir_val_r = st.session_state.get("bar_dir", "Up").lower()
+            knock_val_r = st.session_state.get("bar_knock", "In").lower()
+            bar_pct_r = st.session_state.get('bar_pct_input', 120.0) / 100.0
+            
+            use_w_r = st.session_state.get("bar_use_window", False)
+            if use_w_r:
+                w_pct_r = st.session_state.get("bar_window", (0, 100))
+                w_s_r = (w_pct_r[0] / 100.0) * fixed_maturity
+                w_e_r = (w_pct_r[1] / 100.0) * fixed_maturity
+            else:
+                w_s_r = 0.0
+                w_e_r = fixed_maturity
+
+            prod_ref = BarrierOption(
+                S=ref_value, K=fixed_strike, T=fixed_maturity, r=r, sigma=sigma, q=q,
+                option_type=opt_type_r, direction=dir_val_r, knock_type=knock_val_r, barrier=bar_pct_r,
+                window_start=w_s_r, window_end=w_e_r,
+                num_simulations=st.session_state.get("bar_sims", 2000),
+                execution_style=st.session_state.get("bar_style", "European").lower()
+            )
         else:
-            prod_ref = EuropeanOption(S=ref_value, K=fixed_strike, T=fixed_maturity, r=r, sigma=sigma, q=q, option_type=p_type)
+            opt_type = "call" if "Call" in p_type else "put"
+            if st.session_state.get("vanilla_style", "European").lower() == "american":
+                prod_ref = AmericanOption(S=ref_value, K=fixed_strike, T=fixed_maturity, r=r, sigma=sigma, q=q, option_type=opt_type, num_simulations=st.session_state.get("bar_sims", 2000))
+            else:
+                prod_ref = EuropeanOption(S=ref_value, K=fixed_strike, T=fixed_maturity, r=r, sigma=sigma, q=q, option_type=opt_type)
 
         real_pnl = - (prod_gk.price() - prod_ref.price())
 

@@ -713,7 +713,7 @@ def plot_pnl(engine):
 # ==============================================================================
 
 def plot_payoff(product, spot_range=None):
-    if type(product).__name__ == "EuropeanOption":
+    if type(product).__name__ in ["EuropeanOption", "AmericanOption"]:
         return plot_payoff_european(product, spot_range)
     elif type(product).__name__ == "BarrierOption":
         return plot_payoff_barrier(product, spot_range)
@@ -743,6 +743,68 @@ def plot_risk_profile(product, spot_range):
 # ==============================================================================
 # BASE INSTRUMENT ANALYTICS (from FinancialInstrument)
 # ==============================================================================
+
+def plot_mc_convergence(product, max_sims=None, steps=10):
+    """
+    Plots the convergence of the Monte Carlo price as the number of simulations increases.
+    Only applicable for MonteCarloEngine-based products.
+    """
+    if not hasattr(product, 'num_simulations'):
+        return None
+        
+    actual_max = max_sims if max_sims else getattr(product, 'num_simulations', 5000)
+    if actual_max < 1000:
+        actual_max = 1000
+        
+    sim_counts = np.linspace(max(100, actual_max // steps), actual_max, steps, dtype=int)
+    prices = []
+    
+    # Save original state
+    original_sims = getattr(product, 'num_simulations', 1000)
+    original_N = getattr(product, 'N', 1000)
+    original_seed = getattr(product, 'seed', None)
+    
+    # Fix the seed dynamically so paths grow consistently without crazy jumps, 
+    # but varying N will technically pull different shape matrices.
+    product.seed = original_seed if original_seed else 42
+    
+    for n in sim_counts:
+        product.num_simulations = int(n)
+        product.N = int(n)
+        
+        # Recalculate options parameters that might depend on N internally if any (e.g. within path generation)
+        try:
+            p = product.price()
+            prices.append(p)
+        except Exception:
+            prices.append(np.nan)
+            
+    # Restore original state
+    product.num_simulations = original_sims
+    product.N = original_N
+    product.seed = original_seed
+    
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=sim_counts, y=prices, 
+        mode='lines+markers', 
+        name='MC Price',
+        line=dict(color='cyan', width=2),
+        marker=dict(size=6)
+    ))
+    
+    fig.add_hline(y=prices[-1], line_dash="dash", line_color="gray", annotation_text=f"Final Price: {prices[-1]:.2f}", annotation_position="top left")
+    
+    fig.update_layout(
+        title="Monte Carlo Convergence",
+        xaxis_title="Number of Simulations (N)",
+        yaxis_title="Option Price (€)",
+        template="plotly_dark" if st.session_state.get("theme", "dark") == "dark" else "plotly_white",
+        height=300,
+        margin=dict(l=40, r=20, t=40, b=40),
+        hovermode="x unified",
+    )
+    return fig
 
 def plot_risk_matrix(product, spot_range_pct=0.10, vol_range_pct=0.05, n_spot_steps=5, n_vol_steps=3):
     """

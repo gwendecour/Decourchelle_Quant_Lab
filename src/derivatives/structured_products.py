@@ -25,7 +25,8 @@ class PhoenixStructure(MonteCarloEngine, NumericalGreeksEngine, FinancialInstrum
         
         maturity = float(kwargs.get('T'))
         
-        steps = max(int(252 * maturity), 1)
+        # Enforce constant high-res discretization
+        steps = 300
         self.steps = steps
         
         num_simulations = kwargs.get('num_simulations', 10000)
@@ -49,7 +50,8 @@ class PhoenixStructure(MonteCarloEngine, NumericalGreeksEngine, FinancialInstrum
 
     def get_observation_indices(self):
         """Returns the array indices corresponding to coupon observation dates."""
-        step_size = int(252 / self.obs_frequency)
+        if self.T <= 0: return []
+        step_size = max(1, int(self.steps / (self.obs_frequency * self.T)))
         indices = np.arange(step_size, self.steps + 1, step_size, dtype=int)
         return indices
 
@@ -115,18 +117,25 @@ class BarrierOption(MonteCarloEngine, NumericalGreeksEngine, FinancialInstrument
         self.window_start = float(kwargs.get('window_start', 0.0))
         self.window_end = float(kwargs.get('window_end', maturity))
         
+        self.execution_style = kwargs.get('execution_style', 'european').lower()
+        
         r = kwargs.get('r')
 
-        steps = max(int(252 * maturity), 1)
+        # Enforce constant high-res discretization independently of maturity
+        steps = 300
         self.steps = steps
 
         num_simulations = kwargs.get('num_simulations', 10000)
         self.num_simulations = num_simulations
 
-        MonteCarloEngine.__init__(self,S=S, K=self.K, T=maturity, r=r, sigma=kwargs.get('sigma'), q=kwargs.get('q', 0.0), num_simulations=num_simulations, num_steps=steps, seed=kwargs.get('seed'))
+        # Initialize the correct parent engine based on style
+        if self.execution_style == 'american':
+            # For American Barriers, we must use MC LSMC
+            MonteCarloEngine.__init__(self, S=S, K=self.K, T=maturity, r=r, sigma=kwargs.get('sigma'), q=kwargs.get('q', 0.0), num_simulations=num_simulations, num_steps=steps, seed=kwargs.get('seed'))
+        else:
+            MonteCarloEngine.__init__(self, S=S, K=self.K, T=maturity, r=r, sigma=kwargs.get('sigma'), q=kwargs.get('q', 0.0), num_simulations=num_simulations, num_steps=steps, seed=kwargs.get('seed'))
+            
         FinancialInstrument.__init__(self, **kwargs)    
-
-        pass
 
     # ==========================================================================
     # CORE PRICING (MONTE CARLO)
@@ -164,7 +173,30 @@ class BarrierOption(MonteCarloEngine, NumericalGreeksEngine, FinancialInstrument
             payoffs[not_touched] = vanilla_payoffs[not_touched]
             
         return payoffs 
+    
     def price(self):
+        if hasattr(self, 'execution_style') and self.execution_style == 'american':
+            return self.price_american_option(self.option_type)
+            
         payoffs = self.calculate_payoffs_distribution()
         discount_factor = np.exp(-self.r * self.T)
         return np.mean(payoffs) * discount_factor
+
+from src.derivatives.binomial_tree import BinomialTreeEngine
+
+class AmericanOption(BinomialTreeEngine, NumericalGreeksEngine, FinancialInstrument):
+    def __init__(self, **kwargs):
+        S = float(kwargs.get('S'))
+        self.K = float(kwargs.get('K'))
+        maturity = float(kwargs.get('T'))
+        r = kwargs.get('r')
+        self.option_type = kwargs.get('option_type', 'call').lower()
+
+        # Constant minimum steps for precision
+        steps = 500
+
+        BinomialTreeEngine.__init__(self, S=S, K=self.K, T=maturity, r=r, sigma=kwargs.get('sigma'), q=kwargs.get('q', 0.0), option_type=self.option_type, steps=steps)
+        FinancialInstrument.__init__(self, **kwargs)
+
+    def price(self):
+        return self.price_tree()

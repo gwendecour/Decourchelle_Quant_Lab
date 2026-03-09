@@ -115,10 +115,19 @@ def plot_returns_distribution(portfolio_nav, benchmark_data, benchmark_label="Be
 
     min_x = min(port_rets.min(), bench_rets.min()) - 0.01
     max_x = max(port_rets.max(), bench_rets.max()) + 0.01
+    if min_x == max_x:
+        max_x += 0.01
     x_range = np.linspace(min_x, max_x, 500)
 
-    kde_strat = stats.gaussian_kde(port_rets)(x_range)
-    kde_bench = stats.gaussian_kde(bench_rets)(x_range)
+    try:
+        kde_strat = stats.gaussian_kde(port_rets)(x_range)
+    except Exception:
+        kde_strat = np.zeros_like(x_range)
+        
+    try:
+        kde_bench = stats.gaussian_kde(bench_rets)(x_range)
+    except Exception:
+        kde_bench = np.zeros_like(x_range)
 
     fig = go.Figure()
 
