@@ -380,7 +380,8 @@ def plot_payoff_phoenix(struct, spot_range=None):
 
 
 def plot_price_vs_strike_phoenix(struct, current_spot):
-    """Plots Phoenix price as a function of the Spot level (Moneyness sensitivity)."""
+    """Plots structured product price as a function of the Spot level (Moneyness sensitivity)."""
+    product_name = type(struct).__name__
     spots = np.linspace(current_spot * 0.5, current_spot * 1.5, 50)
     prices = []
     
@@ -394,13 +395,13 @@ def plot_price_vs_strike_phoenix(struct, current_spot):
     current_price = struct.price()
     
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=spots, y=prices, mode='lines', name='Price', line=dict(color='royalblue', width=2)))
+    fig.add_trace(go.Scatter(x=spots, y=prices, mode='lines', name=f'{product_name} Price', line=dict(color='royalblue', width=2)))
     fig.add_trace(go.Scatter(x=[current_spot], y=[current_price], mode='markers', name='Current Spot', marker=dict(color='red', size=10)))
     
     fig.update_layout(
         title=" ",
         xaxis_title="Spot Price",
-        yaxis_title="Phoenix Price",
+        yaxis_title=f"{product_name} Price",
         template="plotly_dark" if st.session_state.get("theme", "dark") == "dark" else "plotly_white",
         height=300,
         margin=dict(l=40, r=20, t=30, b=40)
@@ -409,7 +410,8 @@ def plot_price_vs_strike_phoenix(struct, current_spot):
 
 
 def plot_price_vs_vol_phoenix(struct, current_vol):
-    """Plots Phoenix price sensitivity to implied Volatility (Vega behavior overview)."""
+    """Plots structured product price sensitivity to implied Volatility (Vega behavior overview)."""
+    product_name = type(struct).__name__
     vols = np.linspace(0.05, 0.60, 30) 
     prices = []
     
@@ -423,13 +425,13 @@ def plot_price_vs_vol_phoenix(struct, current_vol):
     current_price = struct.price()
     
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=vols*100, y=prices, mode='lines', name='Price', line=dict(color='orange', width=2)))
+    fig.add_trace(go.Scatter(x=vols*100, y=prices, mode='lines', name=f'{product_name} Price', line=dict(color='orange', width=2)))
     fig.add_trace(go.Scatter(x=[current_vol*100], y=[current_price], mode='markers', name='Current Vol', marker=dict(color='red', size=10)))
     
     fig.update_layout(
         title=" ",
         xaxis_title="Volatility (%)",
-        yaxis_title="Phoenix Price",
+        yaxis_title=f"{product_name} Price",
         template="plotly_dark" if st.session_state.get("theme", "dark") == "dark" else "plotly_white",
         height=300,
         margin=dict(l=40, r=20, t=30, b=40)

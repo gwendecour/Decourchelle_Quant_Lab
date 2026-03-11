@@ -3,6 +3,10 @@
 # ==============================================================================
 
 ASSET_DESCRIPTIONS = {
+    # SINGLE STOCKS
+    'NVDA': 'NVIDIA Corp', 'MC.PA': 'LVMH (Euronext)', 'WMT': 'Walmart Inc.',
+    'JPM': 'JPMorgan Chase', 'JNJ': 'Johnson & Johnson', 'XOM': 'ExxonMobil', 'BA': 'Boeing',
+
     # US EQUITIES - Broad
     'SPY': 'S&P 500 ETF', 'QQQ': 'Nasdaq 100 ETF', 'IWM': 'Russell 2000 ETF',
     'DIA': 'Dow Jones Ind. ETF', 'VTI': 'Total Stock Market', 'VOO': 'S&P 500 (Vanguard)',
@@ -83,12 +87,14 @@ ASSET_DESCRIPTIONS = {
 
 ASSET_POOLS = {
     'Equities US': [
+        'NVDA', 'WMT', 'JPM', 'JNJ', 'XOM', 'BA',
         'SPY', 'QQQ', 'IWM', 'DIA', 'VTI', 'VOO', 'IVV', 'RSP',                     
         'XLE', 'XLF', 'XLK', 'XLV', 'XLY', 'XLP', 'XLU', 'XLI', 'XLB', 'XLRE', 'XLC', 
         'MTUM', 'VLUE', 'QUAL', 'USMV', 'VIG', 'SCHD', 'VYM', 'SDY',                
         'IWD', 'IWF', 'IJR', 'IWC'                                           
     ],
     'Equities Intl': [
+        'MC.PA',
         'EFA', 'VEA', 'IEFA', 'EEM', 'VWO', 'IEMG',                                 
         'VGK', 'EZU', 'EWJ', 'MCHI', 'INDA', 'EWZ', 'EWT', 'EWY', 'EWH', 'EWC',     
         'EWA', 'EWL', 'EWG', 'EWQ', 'EWP', 'EWD', 'EWW', 'ECH', 'EPHE', 'EIDO'      

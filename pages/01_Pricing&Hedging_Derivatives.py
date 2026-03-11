@@ -246,7 +246,8 @@ def set_pricing_scenario(scenario_type):
     current_mat = st.session_state.get('maturity', 1.0) 
 
     # Apply Scenario
-    p_type = st.session_state.global_product_type
+    p_type_raw = st.session_state.global_product_type
+    p_type = "TARF" if p_type_raw == "TARF (for Currencies)" else p_type_raw
     
     # --- STRUCTURE SCENARIOS ---
     if scenario_type == "ATM":
@@ -330,7 +331,7 @@ with st.container(border=True):
             if x == "CUSTOM_YF": return "Custom Ticker (Yahoo Finance)..."
             return f"{x} - {ASSET_DESCRIPTIONS.get(x, '')}"
 
-        classics = ["GLD", "TLT", "EURUSD=X", "SPY", "XLK", "XLV", "XLE", "XLF"]
+        classics = ["NVDA", "MC.PA", "WMT", "JPM", "JNJ", "XOM", "BA", "TLT", "GLD", "EURUSD=X"]
         options = classics + ["SEARCH_UNIVERSE", "CUSTOM_YF", "CUSTOM"]
 
         selected_ticker = st.selectbox(
@@ -360,14 +361,18 @@ with st.container(border=True):
             st.markdown("<div style='color: #ffaa00; font-size: 0.85em; font-weight: 600; margin-top: -5px;'>⚠️ Custom Values Loaded</div>", unsafe_allow_html=True)
         
     with c2:
+        # We define a mapping for UI display
+        product_options = ["Call", "Put", "Barrier Option", "Phoenix", "TARF (for Currencies)"]
+        
         selected_product = st.selectbox(
             "Product", 
-            options=["Call", "Put", "Barrier Option", "Phoenix", "TARF"], 
+            options=product_options, 
             index=None, 
             placeholder="Select Product...", 
             key="global_product_type",
             label_visibility="collapsed"
         )
+        
         
     with c3:
         btn_disabled = (selected_ticker is None)
@@ -428,7 +433,9 @@ if st.session_state.previous_tab != selected_tab:
 
 S, sigma = st.session_state.custom_spot, st.session_state.custom_vol
 r, q = st.session_state.custom_rate, st.session_state.custom_div
-p_type = st.session_state.global_product_type
+
+p_type_raw = st.session_state.global_product_type
+p_type = "TARF" if p_type_raw == "TARF (for Currencies)" else p_type_raw
 
 # --- TAB 1: PRICING ---
 if selected_tab == "Pricing & Payoff":
